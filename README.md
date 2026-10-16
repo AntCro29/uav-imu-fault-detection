@@ -59,6 +59,10 @@ ce dépôt, dans `~/drone/ardupilot`.
   X estimé par l'EKF (XKF2.AX) et innovation magnétomètre (XKF4.SM), cœur 0, avec
   les instants d'injection et de retrait de `SIM_ACC1/2/3_BIAS_X` ; temps depuis
   l'entrée en mode CIRCLE.
+- `scripts/tracer_cap_magneto.py <log.BIN> <image.png>` : cap du drone, intensité du
+  champ mesuré par le compas 1 et innovation magnétomètre (SM) sur un axe de temps
+  commun, avec les instants d'injection et de retrait ; affiche la durée mesurée d'un
+  tour de cercle. Résultat sur le vol 5 : `docs/figures/cap_champ_magneto_vol5.png`.
 - `scripts/comparer_vols.py <image.png>` : innovations des vols automatiques à
   échelles communes (une colonne par type de panne, une ligne par innovation, vol
   nominal en référence). Résultat : `docs/figures/comparaison_vols_auto.png`.
