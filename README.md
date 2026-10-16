@@ -59,6 +59,9 @@ ce dépôt, dans `~/drone/ardupilot`.
   X estimé par l'EKF (XKF2.AX) et innovation magnétomètre (XKF4.SM), cœur 0, avec
   les instants d'injection et de retrait de `SIM_ACC1/2/3_BIAS_X` ; temps depuis
   l'entrée en mode CIRCLE.
+- `scripts/comparer_vols.py <image.png>` : innovations des vols automatiques à
+  échelles communes (une colonne par type de panne, une ligne par innovation, vol
+  nominal en référence). Résultat : `docs/figures/comparaison_vols_auto.png`.
 - `scripts/lancer_vol.sh <scénario>` et `scripts/vol_auto.py` : vol SITL automatique
   (voir « Relancer un vol »).
 - `docs/figures/` : figures issues des premiers vols.
