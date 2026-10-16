@@ -1,12 +1,15 @@
 #!/bin/bash
 # Lance un vol SITL automatique : démarre le SITL, exécute vol_auto.py, arrête le SITL.
-# Usage : scripts/lancer_vol.sh <nominal|gps60|gps30|biais10|biais05|magneto> [vitesse direction turbulence]
+# Usage : scripts/lancer_vol.sh <scénario> [vitesse direction turbulence] [--injection T] [--amplitude A]
+# Scénarios : nominal, gps60, gps30, biais10, biais05, biais (avec --amplitude), magneto.
 # Vent optionnel : vitesse (m/s), direction d'où il vient (degrés), turbulence (m/s).
+# Toutes les options sont transmises à vol_auto.py (voir son en-tête).
 # Le log .BIN est écrit dans ~/drone/ardupilot/logs/ ; le journal du vol dans data/.
 SCENARIO="$1"
 shift
 VENT=("$@")
-NOM="$SCENARIO${VENT[*]:+_vent_${VENT[0]}_${VENT[1]}_${VENT[2]}}"
+# Nom des journaux : scénario suivi des options, espaces et tirets remplacés par « _ »
+NOM="$(echo "$SCENARIO $*" | sed -e 's/--//g' -e 's/ /_/g')"
 DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARDUPILOT="${ARDUPILOT:-$HOME/drone/ardupilot}"
 HORODATAGE="$(date '+%Y%m%d-%H%M%S')"

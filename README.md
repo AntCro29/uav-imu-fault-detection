@@ -9,7 +9,7 @@ modèle de machine learning entraîné sur des vols nominaux.
 Projet en cours : collecte de vols, analyse des innovations, premier détecteur à seuil.
 Le détecteur à base de machine learning n'est pas encore implémenté.
 
-Vingt-trois vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -29,10 +29,11 @@ Vingt-trois vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 16, 17 | automatique | Nominal, vent 6 m/s venant de 0° puis de 90°, turbulence 2 |
 | 18, 19 | automatique | Nominal, vent 9 m/s venant de 0° puis de 90°, turbulence 3 |
 | 20 à 23 | automatique | Sous vent 6 m/s venant de 0°, turbulence 2 : biais 0,5 m/s², biais 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
+| 24 à 31 | automatique | Mêmes quatre pannes sous vent 6 m/s venant de 90° et de 180°, injection à 128, 135 ou 143 s (deux vols par panne) |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 23 forment ainsi une série réalisée avec exactement le même protocole. Les
-vols 12 à 23 ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
+vols 5 à 31 forment ainsi une série réalisée avec exactement le même protocole. Les
+vols 12 à 31 ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`).
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
@@ -89,20 +90,25 @@ fausse alarme sur 2 250 s, mais le seuil de SV monte de 0,02 à 0,24 ; le biais 
 0,5 m/s² n'est plus détecté qu'en 2,1 s (par SP) au lieu de 0,7 s, et plus du tout avec
 un seuil de 5 × max nominal. C'est le compromis entre sensibilité et fausses alarmes.
 
-**Pannes sous vent (vols 20 à 23, 6 m/s)**, même détecteur calibré en validation croisée
-sur les vols 5 à 23 (seuil 2 × max nominal, persistance 0,5 s ; aucune fausse alarme sur
-2 690 s de nominal) :
+**Pannes sous vent (vols 20 à 31, 6 m/s)** : trois vols par panne, avec trois directions de
+vent (0°, 90°, 180°) et trois instants d'injection, donc trois caps différents au début de
+la panne. Même détecteur calibré en validation croisée sur les vols 5 à 31 (seuil 2 × max
+nominal, persistance 0,5 s) : les 17 pannes de la série sont détectées, aucune fausse
+alarme sur 3 693 s de nominal.
 
-| Panne | Sans vent | Sous vent de 6 m/s | Délai de l'EKF (≥ 1), sans / avec vent |
+| Panne | Sans vent | Sous vent de 6 m/s (3 vols) | Délai de l'EKF (≥ 1) sous vent |
 |---|---|---|---|
-| Biais 0,5 m/s² | 2,1 s (SP) | 2,3 s (SP) | jamais / jamais |
-| Biais 1,0 m/s² | 1,5 s (SV + SP) | 1,5 s (SV + SP) | jamais / jamais |
-| Magnétomètre | 0,5 s (SM) | 0,5 s (SM) | 48,7 s / 29,8 s |
-| Coupure GPS 60 s | 0,7 s (perte du fix) | 0,7 s (perte du fix) | jamais / jamais |
+| Biais 0,5 m/s² | 2,1 s (SP) | 2,2 s en moyenne (2,1 à 2,3 s, SP) | jamais |
+| Biais 1,0 m/s² | 1,5 s (SV + SP) | 1,5 s (×3) | jamais |
+| Magnétomètre | 0,5 s (SM) | 0,5 s (×3) | 29,8 s, 29,1 s, jamais (selon le cap) |
+| Coupure GPS 60 s | 0,7 s (perte du fix) | 0,7 s (×3) | jamais |
 
-Les pannes restent détectées sous vent de 6 m/s, avec des délais comparables, une fois le
-seuil relevé pour tolérer le vent ; un seuil de 5 × max nominal manque en revanche les
-deux biais de 0,5 m/s². Un seul vol par panne sous vent.
+Les délais sont quasi identiques d'un vol à l'autre, quels que soient la direction du vent et
+le cap d'injection. Les délais de 0,5 et 0,7 s correspondent au plancher imposé par la
+persistance de 0,5 s. Avec un seuil de 5 × max nominal, 3 pannes sur 17 sont manquées. Ce qui
+varie le plus est la durée de l'état dégradé après le retrait (biais 1,0 : 37 à 53 s ;
+magnétomètre : 82 à 90 s). Limites : trois vols par panne, un seul niveau de vent, direction
+du vent et cap d'injection modifiés ensemble.
 
 ## Version d'ArduPilot
 
@@ -153,9 +159,11 @@ Les logs de vol (`.BIN`, `.tlog`) ne sont pas versionnés.
 ### Vol automatique
 
 ```bash
-scripts/lancer_vol.sh <nominal|gps60|gps30|biais10|biais05|magneto> [vitesse direction turbulence]
+scripts/lancer_vol.sh <scénario> [vitesse direction turbulence] [--injection T] [--amplitude A]
 # exemple : biais de 0,5 m/s² sous un vent de 6 m/s venant du nord, turbulence 2
 scripts/lancer_vol.sh biais05 6 0 2
+# exemple : biais de 0,2 m/s² sans vent, injecté 135 s après l'entrée en CIRCLE
+scripts/lancer_vol.sh biais --amplitude 0.2 --injection 135
 ```
 
 Le script démarre le SITL (`sim_vehicle.py -v ArduCopter -w -N --no-mavproxy`),
@@ -163,8 +171,11 @@ exécute la procédure manuelle décrite ci-dessous en pymavlink, attend le
 désarmement puis arrête le SITL. Il attend que les deux cœurs EKF utilisent le GPS
 avant de passer en GUIDED, vérifie chaque réglage et l'acceptation du décollage, et
 retire la panne si l'altitude descend sous 8 m. Le journal du vol est écrit dans
-`data/`. Le vent optionnel (m/s, degrés d'où il vient, m/s) est réglé avant le décollage,
-uniforme en altitude. Par vent fort, le drone posé peut rester armé (le détecteur
+`data/`. Scénarios : `nominal`, `gps60`, `gps30`, `biais10`, `biais05`, `biais` (avec
+`--amplitude`), `magneto`. Le vent optionnel (m/s, degrés d'où il vient, m/s) est réglé avant
+le décollage, uniforme en altitude. `--injection` fixe l'instant d'injection après l'entrée en
+CIRCLE (120 s par défaut) : le cercle étant très régulier (un tour ≈ 31 s), il fixe aussi le cap
+du drone au début de la panne. `--amplitude` fixe le biais (m/s²) ou le décalage magnétomètre. Par vent fort, le drone posé peut rester armé (le détecteur
 d'atterrissage d'ArduPilot ne conclut pas tant que le régulateur demande de
 l'inclinaison contre le vent) : le script le désarme alors après 15 s au sol.
 
@@ -240,6 +251,7 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Plus de vols avec panne sous vent (plusieurs vols par panne, autres vents).
+- Limite de détection : biais d'accéléromètre de 0,2 et 0,3 m/s², sans vent et sous vent.
+- Pannes sous vent fort (9 m/s).
 - Traitement de la phase qui suit le retrait d'une panne.
 - Détecteur ML, comparé au détecteur à seuil sur les mêmes vols.

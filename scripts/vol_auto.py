@@ -1,9 +1,14 @@
 """Vol SITL automatique selon la procédure du projet, piloté en pymavlink au lieu de MAVProxy.
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
+                           [--injection T] [--amplitude A]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
-Scénarios : nominal, gps60, gps30, biais10, biais05, magneto
+Scénarios : nominal, gps60, gps30, biais10, biais05, biais (amplitude obligatoire), magneto
 Vent optionnel : vitesse (m/s), direction d'où il vient (degrés vrais), turbulence (m/s).
+--injection : instant d'injection en s après l'entrée en CIRCLE (120 par défaut). Le cercle
+est très régulier (un tour ≈ 30,8 s) : changer l'instant change le cap à l'injection.
+--amplitude : biais en m/s² (biais*), ou décalage ajouté à la valeur de départ de
+SIM_MAG*_OFS_X (magneto, défaut +150) ; sans objet pour les coupures GPS.
 Réglé avant le décollage avec SIM_WIND_T = 1 (vent uniforme en altitude : le drone à 15 m
 subit le vent réglé ; par défaut le simulateur le réduirait de √(altitude / 60)).
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
@@ -11,10 +16,12 @@ Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
 CIRCLE_RADIUS_M 30, CIRCLE_RATE 15, mode guided, armement, takeoff 15,
 stabilisation 10 s, rc 3 1500 (renvoyé toutes les 0,5 s), mode circle.
-Vol nominal : 180 s de cercle. Vol avec panne : 120 s de cercle, injection
-(tous les paramètres envoyés d'affilée), durée de la panne, retrait, 90 s de cercle.
+Vol nominal : 180 s de cercle. Vol avec panne : cercle jusqu'à l'instant d'injection (120 s
+par défaut), injection (tous les paramètres envoyés d'affilée), durée de la panne, retrait,
+90 s de cercle.
 Puis mode rtl et attente du désarmement.
 """
+import argparse
 import sys
 import time
 from pymavlink import mavutil
@@ -26,20 +33,39 @@ SCENARIOS = {
     "gps30": {"params": ["SIM_GPS1_ENABLE"], "attendu": 1.0, "injection": 0.0, "retrait": 1.0, "duree": 30},
     "biais10": {"params": IMU, "attendu": 0.0, "injection": 1.0, "retrait": 0.0, "duree": 60},
     "biais05": {"params": IMU, "attendu": 0.0, "injection": 0.5, "retrait": 0.0, "duree": 60},
+    "biais": {"params": IMU, "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60},
     "magneto": {"params": ["SIM_MAG1_OFS_X", "SIM_MAG2_OFS_X", "SIM_MAG3_OFS_X"],
                 "attendu": 5.0, "injection": 155.0, "retrait": 5.0, "duree": 60},
 }
 CERCLE_NOMINAL = 180
-CERCLE_AVANT = 120
 CERCLE_APRES = 90
 ALT_DECOLLAGE = 15.0
 ALT_SECURITE = 8.0
 GUIDED, RTL, CIRCLE = 4, 6, 7
 
-if len(sys.argv) not in (2, 5) or sys.argv[1] not in SCENARIOS:
-    sys.exit(f"Usage : python vol_auto.py <{'|'.join(SCENARIOS)}> [vent_vitesse vent_direction vent_turbulence]")
-panne = SCENARIOS[sys.argv[1]]
-vent = [float(x) for x in sys.argv[2:5]] if len(sys.argv) == 5 else None
+arguments = argparse.ArgumentParser(description="Vol SITL automatique")
+arguments.add_argument("scenario", choices=list(SCENARIOS))
+arguments.add_argument("vent", nargs="*", type=float, help="vitesse (m/s) direction (deg) turbulence (m/s)")
+arguments.add_argument("--injection", type=float, default=120.0, help="instant d'injection après l'entrée en CIRCLE (s)")
+arguments.add_argument("--amplitude", type=float, help="biais (m/s²) ou décalage magnétomètre à injecter")
+args = arguments.parse_args()
+if len(args.vent) not in (0, 3):
+    arguments.error("le vent demande trois valeurs : vitesse direction turbulence")
+vent = args.vent or None
+CERCLE_AVANT = args.injection
+
+panne = SCENARIOS[args.scenario]
+if panne is not None:
+    panne = dict(panne)
+    if args.amplitude is not None:
+        if panne["params"] == ["SIM_GPS1_ENABLE"]:
+            arguments.error("--amplitude est sans objet pour une coupure GPS")
+        # biais : valeur injectée = amplitude ; magnétomètre : décalage ajouté à la valeur de départ
+        panne["injection"] = panne["attendu"] + args.amplitude
+    elif panne["injection"] is None:
+        arguments.error(f"le scénario {args.scenario} demande --amplitude")
+elif args.amplitude is not None or args.injection != 120.0:
+    arguments.error("--injection et --amplitude sont sans objet pour un vol nominal")
 
 etat = {"alt": None, "arme": False, "mode": None, "crash": False, "fix": None, "sats": None,
         "ekf_gps": set(), "ack_takeoff": None}
@@ -71,7 +97,8 @@ def connecter():
 
 
 m = connecter()
-journal(f"Connecté au SITL, scénario {sys.argv[1]}")
+journal(f"Connecté au SITL, scénario {args.scenario}, vent {vent}, injection à {CERCLE_AVANT:g} s"
+        + ("" if panne is None else f", valeur injectée {panne['injection']:g}"))
 m.mav.request_data_stream_send(1, 1, mavutil.mavlink.MAV_DATA_STREAM_ALL, 4, 1)
 
 
