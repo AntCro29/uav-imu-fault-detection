@@ -6,8 +6,8 @@ modèle de machine learning entraîné sur des vols nominaux.
 
 ## État actuel
 
-Projet en phase exploratoire : collecte de vols et premières analyses.
-Aucun détecteur n'est encore implémenté.
+Projet en cours : collecte de vols, analyse des innovations, premier détecteur à seuil.
+Le détecteur à base de machine learning n'est pas encore implémenté.
 
 Onze vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
@@ -40,6 +40,24 @@ le biais accéléromètre est une panne silencieuse (aucun effet sur le statut G
 qui fait réagir immédiatement les innovations de vitesse, de position et du
 magnétomètre.
 
+### Premier détecteur à seuil (vols 5 à 11)
+
+Alarme si une innovation (SV, SP ou SM, cœur 0) dépasse un seuil calibré sur les phases
+nominales, ou si le GPS perd son fix 3D, pendant 0,5 s consécutives. Seuil = 2 × maximum
+nominal du canal, calibré en validation croisée (le vol évalué est exclu de la calibration).
+
+| Panne | Délai de détection | Délai de l'EKF (innovation ≥ 1) |
+|---|---|---|
+| Biais accéléromètre 0,5 et 1,0 m/s² | 0,7 s (SV) | jamais atteint |
+| Décalage magnétomètre | 0,5 s (SM) | 48,7 s |
+| Coupure GPS 30 et 60 s | 0,7 s (perte du fix) ; 17,3 s avec les innovations seules | jamais atteint |
+
+Aucune fausse alarme sur 890 s de vol nominal. **Ces résultats sont optimistes** : la
+simulation est sans vent ni perturbations, le nominal plafonne à 0,01 et le problème est
+donc trop facile. Point ouvert : après le retrait d'une panne magnétomètre ou d'un biais de
+1,0 m/s², l'alarme reste active pendant toute la phase d'observation (90 s), car l'état
+estimé par l'EKF reste faux alors que le capteur est redevenu sain.
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -59,6 +77,9 @@ ce dépôt, dans `~/drone/ardupilot`.
   X estimé par l'EKF (XKF2.AX) et innovation magnétomètre (XKF4.SM), cœur 0, avec
   les instants d'injection et de retrait de `SIM_ACC1/2/3_BIAS_X` ; temps depuis
   l'entrée en mode CIRCLE.
+- `scripts/detecteur_seuil.py <dossier_jeu_donnees> [facteur persistance]` : détecteur
+  à seuil évalué en validation croisée. Sans argument, balaye plusieurs réglages ; avec,
+  détail vol par vol (délai, canal, comparaison avec la porte de l'EKF, alarmes après panne).
 - `scripts/construire_jeu_donnees.py <dossier> <log.BIN> [...]` : jeu de données
   étiqueté, un CSV par log (innovations du cœur 0 à 10 Hz, statut GPS, phase du vol,
   type et amplitude de panne, étiquette `nominal` / `panne` / `apres_panne`, temps
@@ -165,6 +186,6 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Analyse des innovations sur les vols automatiques (5 à 11).
-- Construction d'un jeu de données étiqueté à partir des logs.
-- Détecteur à seuil statistique, puis détecteur ML, comparés sur les mêmes vols.
+- Vols nominaux avec vent, puis réévaluation du détecteur à seuil.
+- Traitement de la phase qui suit le retrait d'une panne.
+- Détecteur ML, comparé au détecteur à seuil sur les mêmes vols.
