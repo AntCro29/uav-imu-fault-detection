@@ -31,8 +31,8 @@ Vingt-trois vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 20 à 23 | automatique | Sous vent 6 m/s venant de 0°, turbulence 2 : biais 0,5 m/s², biais 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 19 forment ainsi une série réalisée avec exactement le même protocole. Les
-vols 12 à 19 ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
+vols 5 à 23 forment ainsi une série réalisée avec exactement le même protocole. Les
+vols 12 à 23 ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`).
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
