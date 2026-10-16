@@ -59,6 +59,12 @@ ce dépôt, dans `~/drone/ardupilot`.
   X estimé par l'EKF (XKF2.AX) et innovation magnétomètre (XKF4.SM), cœur 0, avec
   les instants d'injection et de retrait de `SIM_ACC1/2/3_BIAS_X` ; temps depuis
   l'entrée en mode CIRCLE.
+- `scripts/construire_jeu_donnees.py <dossier> <log.BIN> [...]` : jeu de données
+  étiqueté, un CSV par log (innovations du cœur 0 à 10 Hz, statut GPS, phase du vol,
+  type et amplitude de panne, étiquette `nominal` / `panne` / `apres_panne`, temps
+  depuis l'injection et le retrait). Étiquettes tirées automatiquement des changements
+  de paramètres `SIM_*` enregistrés dans le log. Les CSV sont régénérables et ne sont
+  pas versionnés (`data/`).
 - `scripts/tracer_cap_magneto.py <log.BIN> <image.png>` : cap du drone, intensité du
   champ mesuré par le compas 1 et innovation magnétomètre (SM) sur un axe de temps
   commun, avec les instants d'injection et de retrait ; affiche la durée mesurée d'un
