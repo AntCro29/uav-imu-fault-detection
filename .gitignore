@@ -1,0 +1,16 @@
+# Logs de vol et données générées
+*.BIN
+*.bin
+*.tlog
+data/*
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+
+# macOS et secrets
+.DS_Store
+.env
