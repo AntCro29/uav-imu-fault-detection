@@ -43,6 +43,10 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/trouver_param.py <log.BIN>` : instants où `SIM_GPS1_ENABLE` change.
 - `scripts/verif_biais.py <log.BIN>` : biais accéléromètre X estimé par l'EKF
   (XKF2.AX, cœur 0) face aux changements de `SIM_ACC1_BIAS_X`.
+- `scripts/superposer_biais_magneto.py <log.BIN> <image.png>` : biais accéléromètre
+  X estimé par l'EKF (XKF2.AX) et innovation magnétomètre (XKF4.SM), cœur 0, avec
+  les instants d'injection et de retrait de `SIM_ACC1/2/3_BIAS_X` ; temps depuis
+  l'entrée en mode CIRCLE.
 - `docs/figures/` : figures issues des premiers vols.
 
 Les logs de vol (`.BIN`, `.tlog`) ne sont pas versionnés.
