@@ -9,7 +9,7 @@ modèle de machine learning entraîné sur des vols nominaux.
 Projet en phase exploratoire : collecte de vols et premières analyses.
 Aucun détecteur n'est encore implémenté.
 
-Sept vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Onze vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -20,6 +20,13 @@ Sept vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 5 | automatique | Décalage de +150 sur `SIM_MAG1/2/3_OFS_X` (magnétomètres), pendant 60 s |
 | 6 | automatique | Biais de 0,5 m/s² sur l'accéléromètre X des trois IMU simulées, pendant 60 s |
 | 7 | automatique | Coupure GPS de 30 s |
+| 8 | automatique | Nominal |
+| 9 | automatique | Nominal |
+| 10 | automatique | Coupure GPS de 60 s |
+| 11 | automatique | Biais de 1,0 m/s² sur l'accéléromètre X des trois IMU simulées, pendant 60 s |
+
+Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
+vols 5 à 11 forment ainsi une série réalisée avec exactement le même protocole.
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
 d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
@@ -145,8 +152,6 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Refaire les vols 1 à 4 en pilotage automatique, pour disposer d'une base de vols
-  réalisés avec exactement le même protocole.
-- Analyse des innovations sur les vols 5 à 7.
+- Analyse des innovations sur les vols automatiques (5 à 11).
 - Construction d'un jeu de données étiqueté à partir des logs.
 - Détecteur à seuil statistique, puis détecteur ML, comparés sur les mêmes vols.
