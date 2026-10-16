@@ -14,3 +14,6 @@ __pycache__/
 # macOS et secrets
 .DS_Store
 .env
+
+# Contexte privé pour Claude Code (non versionné)
+CLAUDE.md
