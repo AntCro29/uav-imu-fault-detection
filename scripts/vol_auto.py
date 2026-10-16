@@ -1,7 +1,11 @@
 """Vol SITL automatique selon la procédure du projet, piloté en pymavlink au lieu de MAVProxy.
 
-Usage : python vol_auto.py <scenario>   (le SITL doit écouter sur tcp:127.0.0.1:5760)
+Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
+        (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, magneto
+Vent optionnel : vitesse (m/s), direction d'où il vient (degrés vrais), turbulence (m/s).
+Réglé avant le décollage avec SIM_WIND_T = 1 (vent uniforme en altitude : le drone à 15 m
+subit le vent réglé ; par défaut le simulateur le réduirait de √(altitude / 60)).
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -32,9 +36,10 @@ ALT_DECOLLAGE = 15.0
 ALT_SECURITE = 8.0
 GUIDED, RTL, CIRCLE = 4, 6, 7
 
-if len(sys.argv) != 2 or sys.argv[1] not in SCENARIOS:
-    sys.exit(f"Usage : python vol_auto.py <{'|'.join(SCENARIOS)}>")
+if len(sys.argv) not in (2, 5) or sys.argv[1] not in SCENARIOS:
+    sys.exit(f"Usage : python vol_auto.py <{'|'.join(SCENARIOS)}> [vent_vitesse vent_direction vent_turbulence]")
 panne = SCENARIOS[sys.argv[1]]
+vent = [float(x) for x in sys.argv[2:5]] if len(sys.argv) == 5 else None
 
 etat = {"alt": None, "arme": False, "mode": None, "crash": False, "fix": None, "sats": None,
         "ekf_gps": set(), "ack_takeoff": None}
@@ -164,6 +169,11 @@ if not pomper(180, lambda: {"IMU0", "IMU1"} <= etat["ekf_gps"]):
     sys.exit("L'EKF n'utilise pas le GPS")
 journal("Les deux cœurs EKF utilisent le GPS")
 
+# Vent (avant le décollage, pour qu'il soit établi pendant tout le cercle)
+if vent is not None:
+    regler({"SIM_WIND_T": 1})
+    regler({"SIM_WIND_SPD": vent[0], "SIM_WIND_DIR": vent[1], "SIM_WIND_TURB": vent[2]})
+
 # Paramètres
 regler({"FS_EKF_ACTION": 0})
 regler({"CIRCLE_RADIUS_M": 30})
@@ -219,8 +229,19 @@ else:
 
 # Atterrissage
 changer_mode(RTL, "rtl")
-if not pomper(240, lambda: not etat["arme"]):
-    sys.exit("Pas de désarmement après RTL")
+if not pomper(240, lambda: not etat["arme"] or (etat["alt"] is not None and etat["alt"] < 0.3)):
+    sys.exit("Pas d'atterrissage après RTL")
+# Avec du vent, le drone posé peut rester armé : le régulateur demande encore de l'inclinaison
+# pour tenir la position, et le détecteur d'atterrissage d'ArduPilot ne conclut jamais
+# (drapeau ANGLE de LDET, vu au log 26). On désarme alors comme le ferait un pilote.
+if not pomper(15, lambda: not etat["arme"]):
+    journal("Toujours armé 15 s après le contact avec le sol : désarmement demandé")
+    m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0)
+    if not pomper(5, lambda: not etat["arme"]):
+        journal("Désarmement refusé : désarmement forcé (drone au sol)")
+        m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 21196, 0, 0, 0, 0, 0)
+        if not pomper(5, lambda: not etat["arme"]):
+            sys.exit("Désarmement impossible")
 journal("DISARMED")
 pomper(5)
 journal("Vol terminé")

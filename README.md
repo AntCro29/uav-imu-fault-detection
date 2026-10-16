@@ -9,7 +9,7 @@ modèle de machine learning entraîné sur des vols nominaux.
 Projet en cours : collecte de vols, analyse des innovations, premier détecteur à seuil.
 Le détecteur à base de machine learning n'est pas encore implémenté.
 
-Onze vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Dix-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -24,9 +24,15 @@ Onze vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 9 | automatique | Nominal |
 | 10 | automatique | Coupure GPS de 60 s |
 | 11 | automatique | Biais de 1,0 m/s² sur l'accéléromètre X des trois IMU simulées, pendant 60 s |
+| 12, 13 | automatique | Nominal, vent 6 m/s venant de 270°, turbulence 2 (vols identiques) |
+| 14, 15 | automatique | Nominal, vent 3 m/s venant de 0° puis de 90°, turbulence 1 |
+| 16, 17 | automatique | Nominal, vent 6 m/s venant de 0° puis de 90°, turbulence 2 |
+| 18, 19 | automatique | Nominal, vent 9 m/s venant de 0° puis de 90°, turbulence 3 |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 11 forment ainsi une série réalisée avec exactement le même protocole.
+vols 5 à 19 forment ainsi une série réalisée avec exactement le même protocole. Les
+vols 12 à 19 ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
+uniforme en altitude (`SIM_WIND_T = 1`).
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
 d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
@@ -56,7 +62,32 @@ Aucune fausse alarme sur 890 s de vol nominal. **Ces résultats sont optimistes*
 simulation est sans vent ni perturbations, le nominal plafonne à 0,01 et le problème est
 donc trop facile. Point ouvert : après le retrait d'une panne magnétomètre ou d'un biais de
 1,0 m/s², l'alarme reste active pendant toute la phase d'observation (90 s), car l'état
-estimé par l'EKF reste faux alors que le capteur est redevenu sain.
+estimé par l'EKF reste faux alors que le capteur est redevenu sain. Dans l'évaluation,
+cette alarme est comptée comme un « état dégradé » (navigation en récupération), mesuré
+à part, et non comme une fausse alarme.
+
+### Effet du vent (vols 12 à 19)
+
+Le vent dégrade la tenue du cercle et fait monter les innovations nominales : le
+maximum de SV passe de 0,01 sans vent à 0,03-0,04 (3 m/s), 0,07-0,08 (6 m/s) et
+0,11-0,12 (9 m/s). À 9 m/s, plus rapide que le drone sur son cercle (≈ 6 m/s), la
+trajectoire n'est plus un cercle.
+
+![Trajectoires sous vent](docs/figures/trajectoires_vent.png)
+
+**Détecteur réglé sans vent, évalué sur les vols venteux** (fausses alarmes par vol) :
+
+| Seuil | 3 m/s | 6 m/s | 9 m/s |
+|---|---|---|---|
+| 2 × max nominal (0,02) | 0 | 10 à 16 | 58 et 70 |
+| 3 × max nominal (0,03) | 0 | 0 à 4 | 20 et 30 |
+| 5 × max nominal (0,05), persistance 0,5 s | 0 | 0 | 0 et 1 |
+
+**Détecteur calibré en incluant le vent** (validation croisée sur les vols 5 à 19) : aucune
+fausse alarme sur 2 250 s, mais le seuil de SV monte de 0,02 à 0,24 ; le biais de
+0,5 m/s² n'est plus détecté qu'en 2,1 s (par SP) au lieu de 0,7 s, et plus du tout avec
+un seuil de 5 × max nominal. C'est le compromis entre sensibilité et fausses alarmes. Les
+vols avec panne étant tous sans vent, la détection sous vent reste à évaluer.
 
 ## Version d'ArduPilot
 
@@ -77,6 +108,9 @@ ce dépôt, dans `~/drone/ardupilot`.
   X estimé par l'EKF (XKF2.AX) et innovation magnétomètre (XKF4.SM), cœur 0, avec
   les instants d'injection et de retrait de `SIM_ACC1/2/3_BIAS_X` ; temps depuis
   l'entrée en mode CIRCLE.
+- `scripts/tracer_trajectoires.py <image.png> <log.BIN> [...]` : trajectoires pendant le
+  cercle vues de dessus, côte à côte, avec le vent réglé. Résultat :
+  `docs/figures/trajectoires_vent.png`.
 - `scripts/detecteur_seuil.py <dossier_jeu_donnees> [facteur persistance]` : détecteur
   à seuil évalué en validation croisée. Sans argument, balaye plusieurs réglages ; avec,
   détail vol par vol (délai, canal, comparaison avec la porte de l'EKF, alarmes après panne).
@@ -104,7 +138,9 @@ Les logs de vol (`.BIN`, `.tlog`) ne sont pas versionnés.
 ### Vol automatique
 
 ```bash
-scripts/lancer_vol.sh <nominal|gps60|gps30|biais10|biais05|magneto>
+scripts/lancer_vol.sh <nominal|gps60|gps30|biais10|biais05|magneto> [vitesse direction turbulence]
+# exemple : biais de 0,5 m/s² sous un vent de 6 m/s venant du nord, turbulence 2
+scripts/lancer_vol.sh biais05 6 0 2
 ```
 
 Le script démarre le SITL (`sim_vehicle.py -v ArduCopter -w -N --no-mavproxy`),
@@ -112,7 +148,10 @@ exécute la procédure manuelle décrite ci-dessous en pymavlink, attend le
 désarmement puis arrête le SITL. Il attend que les deux cœurs EKF utilisent le GPS
 avant de passer en GUIDED, vérifie chaque réglage et l'acceptation du décollage, et
 retire la panne si l'altitude descend sous 8 m. Le journal du vol est écrit dans
-`data/`.
+`data/`. Le vent optionnel (m/s, degrés d'où il vient, m/s) est réglé avant le décollage,
+uniforme en altitude. Par vent fort, le drone posé peut rester armé (le détecteur
+d'atterrissage d'ArduPilot ne conclut pas tant que le régulateur demande de
+l'inclinaison contre le vent) : le script le désarme alors après 15 s au sol.
 
 ### Vol manuel
 

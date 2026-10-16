@@ -12,8 +12,10 @@ Calibration : lignes « nominal » de la phase cercle, sans les 10 premières se
 AUTRES vols que celui évalué (validation croisée), pour ne pas mesurer les fausses alarmes
 sur les données qui ont fixé le seuil.
 Métriques (phase cercle uniquement) : délai de détection après l'injection, canal qui détecte
-en premier, nombre d'alarmes pendant le nominal, durée d'alarme active dans l'après-panne
-au-delà d'une fenêtre de 30 ou 60 s après le retrait. Pour comparaison : délai auquel l'EKF atteint sa propre porte
+en premier, nombre de fausses alarmes pendant le nominal, et durée d'« état dégradé » après le
+retrait (alarme active alors que le capteur est redevenu sain : navigation en récupération,
+compté à part et non comme fausse alarme), avec l'indication si l'alarme est encore active à
+la fin de l'observation. Pour comparaison : délai auquel l'EKF atteint sa propre porte
 (innovation ≥ 1, mesure rejetée).
 """
 import glob
@@ -26,7 +28,6 @@ DEBUT_CALIBRATION = 10.0   # s après l'entrée en CIRCLE (transition de mode é
 FACTEURS = [1.5, 2, 3, 5]
 PERSISTANCES = [1, 5, 10]
 FIX_3D = 3                  # gps_fix < 3 : pas de fix 3D
-FENETRES_APRES = [30, 60]   # l'après-panne en cercle dure 90 s : au-delà, plus de données
 
 
 def charger(dossier):
@@ -74,11 +75,13 @@ def evaluer_vol(df, seuil, persistance, regle_gps=True):
             res["canal"] = "+".join(c for c in par_canal if par_canal[c][k])
         porte = (cercle[CANAUX].max(axis=1) >= 1.0) & apres_inj
         res["delai_ekf_s"] = cercle.t_cercle_s[porte.idxmax()] - t_inj if porte.any() else None
+        # Après le retrait, une alarme active n'est pas une fausse alarme mais un « état dégradé »
+        # (navigation en récupération, choix du 2026-10-16) : on mesure sa durée à part
         retrait = pd.to_numeric(cercle.t_depuis_retrait_s, errors="coerce")
-        for w in FENETRES_APRES:
-            # durée (s) pendant laquelle l'alarme est active au-delà de la fenêtre : compte aussi
-            # une alarme commencée pendant la panne et qui ne s'éteint pas après le retrait
-            res[f"fa_apres_{w}"] = (alarme & (retrait > w)).sum() / 10
+        apres = retrait >= 0
+        res["degrade_s"] = (alarme & apres).sum() / 10
+        res["observation_s"] = apres.sum() / 10
+        res["encore_actif"] = bool(alarme[apres].iloc[-1]) if apres.any() else False
     return res
 
 
@@ -90,7 +93,7 @@ def detail(vols, facteur, persistance):
     print(f"Réglage : seuil = {facteur} × max nominal, persistance {persistance} échantillon(s) "
           f"({persistance / 10:.1f} s)\n")
     print(f"{'log':>4} {'panne':<10} {'seuils SV/SP/SM':<17} {'innov. seules':>13} {'délai':>8} {'canal':<9} "
-          f"{'EKF ≥ 1':>8} {'FA nom.':>8} " + " ".join(f"{'alarme >' + str(w) + 's':>11}" for w in FENETRES_APRES))
+          f"{'EKF ≥ 1':>8} {'FA nom.':>8} {'état dégradé après retrait':>27}")
     for n, df in vols.items():
         s = seuils(vols, n, facteur)
         r = evaluer_vol(df, s, persistance)
@@ -101,21 +104,28 @@ def detail(vols, facteur, persistance):
         delai = fmt(r.get("delai_s")) + ("" if r.get("pendant_panne", True) else " (après retrait)")
         print(f"{n:>4} {panne:<10} {'/'.join(f'{s[c]:.3f}' for c in CANAUX):<17} {fmt(sans_gps):>13} {delai:>8} "
               f"{r.get('canal', '—'):<9} {fmt(r.get('delai_ekf_s')):>8} {r['fa_nominal']:>8} "
-              + " ".join(f"{fmt(r.get(f'fa_apres_{w}')):>11}" for w in FENETRES_APRES))
+              f"{degrade(r):>27}")
+
+
+def degrade(r):
+    if "degrade_s" not in r:
+        return "—"
+    fin = ", encore actif à la fin" if r["encore_actif"] else ""
+    return f"{r['degrade_s']:.1f} s sur {r['observation_s']:.0f} s{fin}"
 
 
 def balayage(vols):
     print(f"{'facteur':>7} {'persist.':>8} {'détectées':>10} {'délai max':>10} "
-          f"{'FA nominal':>11} " + " ".join(f"{'alarme >' + str(w) + 's':>11}" for w in FENETRES_APRES))
+          f"{'FA nominal':>11} {'état dégradé total':>19}")
     for facteur in FACTEURS:
         for persistance in PERSISTANCES:
             resultats = [evaluer_vol(df, seuils(vols, n, facteur), persistance) for n, df in vols.items()]
-            avec_panne = [r for r in resultats if "fa_apres_30" in r]
+            avec_panne = [r for r in resultats if "degrade_s" in r]
             detectees = [r for r in avec_panne if r.get("pendant_panne")]
             delai_max = max((r["delai_s"] for r in detectees), default=None)
             print(f"{facteur:>7} {persistance:>8} {len(detectees):>5} / {len(avec_panne):<3} "
                   f"{fmt(delai_max):>10} {sum(r['fa_nominal'] for r in resultats):>11} "
-                  + " ".join(f"{fmt(sum(r[f'fa_apres_{w}'] for r in avec_panne)):>11}" for w in FENETRES_APRES))
+                  f"{fmt(sum(r['degrade_s'] for r in avec_panne)):>19}")
     duree = sum(evaluer_vol(df, seuils(vols, n, 2), 1)["duree_nominal_s"] for n, df in vols.items())
     print(f"\nDurée nominale évaluée (cercle, hors 10 premières s) : {duree:.0f} s sur {len(vols)} vols.")
 
