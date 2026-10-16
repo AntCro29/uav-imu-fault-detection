@@ -9,18 +9,23 @@ modèle de machine learning entraîné sur des vols nominaux.
 Projet en phase exploratoire : collecte de vols et premières analyses.
 Aucun détecteur n'est encore implémenté.
 
-Quatre vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Sept vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
-| Vol | Scénario |
-|-----|----------|
-| 1 | Nominal |
-| 2 | Coupure GPS de 60 s |
-| 3 | Nominal |
-| 4 | Biais de 1,0 m/s² sur l'accéléromètre X des trois IMU simulées, pendant environ 60 s |
+| Vol | Pilotage | Scénario |
+|-----|----------|----------|
+| 1 | manuel | Nominal |
+| 2 | manuel | Coupure GPS de 60 s |
+| 3 | manuel | Nominal |
+| 4 | manuel | Biais de 1,0 m/s² sur l'accéléromètre X des trois IMU simulées, pendant environ 60 s |
+| 5 | automatique | Décalage de +150 sur `SIM_MAG1/2/3_OFS_X` (magnétomètres), pendant 60 s |
+| 6 | automatique | Biais de 0,5 m/s² sur l'accéléromètre X des trois IMU simulées, pendant 60 s |
+| 7 | automatique | Coupure GPS de 30 s |
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
 d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
-ont été biaisées simultanément pendant environ 62 s.
+ont été biaisées simultanément pendant environ 62 s. Dans les vols automatiques,
+les paramètres des trois capteurs sont envoyés d'affilée et les durées sont exactes
+(120 s de cercle, panne, 90 s de cercle).
 
 Premières observations qualitatives, sur un seul vol par type de panne :
 la coupure GPS se voit d'abord dans le statut du fix GPS, avant les innovations ;
@@ -47,13 +52,30 @@ ce dépôt, dans `~/drone/ardupilot`.
   X estimé par l'EKF (XKF2.AX) et innovation magnétomètre (XKF4.SM), cœur 0, avec
   les instants d'injection et de retrait de `SIM_ACC1/2/3_BIAS_X` ; temps depuis
   l'entrée en mode CIRCLE.
+- `scripts/lancer_vol.sh <scénario>` et `scripts/vol_auto.py` : vol SITL automatique
+  (voir « Relancer un vol »).
 - `docs/figures/` : figures issues des premiers vols.
 
 Les logs de vol (`.BIN`, `.tlog`) ne sont pas versionnés.
 
 ## Relancer un vol
 
-### 1. Lancer la simulation
+### Vol automatique
+
+```bash
+scripts/lancer_vol.sh <nominal|gps60|gps30|biais10|biais05|magneto>
+```
+
+Le script démarre le SITL (`sim_vehicle.py -v ArduCopter -w -N --no-mavproxy`),
+exécute la procédure manuelle décrite ci-dessous en pymavlink, attend le
+désarmement puis arrête le SITL. Il attend que les deux cœurs EKF utilisent le GPS
+avant de passer en GUIDED, vérifie chaque réglage et l'acceptation du décollage, et
+retire la panne si l'altitude descend sous 8 m. Le journal du vol est écrit dans
+`data/`.
+
+### Vol manuel
+
+#### 1. Lancer la simulation
 
 ```bash
 cd ~/drone/ardupilot
@@ -65,7 +87,7 @@ du même état. Sur la machine de développement, les fenêtres `--console` et `
 ne s'ouvrent pas : le vol se pilote depuis le prompt MAVProxy et se suit dans
 QGroundControl.
 
-### 2. Paramètres, décollage et cercle (prompt MAVProxy)
+#### 2. Paramètres, décollage et cercle (prompt MAVProxy)
 
 ```
 param set FS_EKF_ACTION 0      # failsafe EKF en « report only » : pas de changement de mode
@@ -88,7 +110,7 @@ rc 3 1500                      # throttle à mi-course, nécessaire avant CIRCLE
 mode circle
 ```
 
-### 3. Injection d'une panne
+#### 3. Injection d'une panne
 
 Après 2 min de cercle nominal, injecter la panne, la maintenir environ 60 s, la
 retirer, puis laisser 90 s de cercle.
@@ -105,7 +127,7 @@ param set SIM_ACC3_BIAS_X 1.0
 
 Un vol nominal comporte environ 3 min de cercle, sans panne.
 
-### 4. Atterrir
+#### 4. Atterrir
 
 ```
 mode rtl
@@ -123,6 +145,8 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Vols supplémentaires : panne magnétomètre, biais accéléromètre de 0,5 m/s², coupure GPS de 30 s.
+- Refaire les vols 1 à 4 en pilotage automatique, pour disposer d'une base de vols
+  réalisés avec exactement le même protocole.
+- Analyse des innovations sur les vols 5 à 7.
 - Construction d'un jeu de données étiqueté à partir des logs.
 - Détecteur à seuil statistique, puis détecteur ML, comparés sur les mêmes vols.
