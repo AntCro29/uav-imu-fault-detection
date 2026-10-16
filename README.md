@@ -18,6 +18,10 @@ Quatre vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 3 | Nominal |
 | 4 | Biais de 1.0 sur l'accéléromètre X des trois IMU simulées, pendant environ 60 s |
 
+Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
+d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
+ont été biaisées simultanément pendant environ 62 s.
+
 Premières observations qualitatives, sur un seul vol par type de panne :
 la coupure GPS se voit d'abord dans le statut du fix GPS, avant les innovations ;
 le biais accéléromètre est une panne silencieuse (aucun effet sur le statut GPS)
