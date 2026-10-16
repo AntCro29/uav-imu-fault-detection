@@ -16,7 +16,7 @@ Quatre vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 1 | Nominal |
 | 2 | Coupure GPS de 60 s |
 | 3 | Nominal |
-| 4 | Biais de 1.0 sur l'accéléromètre X des trois IMU simulées, pendant environ 60 s |
+| 4 | Biais de 1,0 m/s² sur l'accéléromètre X des trois IMU simulées, pendant environ 60 s |
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
 d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
@@ -119,6 +119,6 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Vols supplémentaires : panne magnétomètre, biais accéléromètre de 0.5, coupure GPS de 30 s.
+- Vols supplémentaires : panne magnétomètre, biais accéléromètre de 0,5 m/s², coupure GPS de 30 s.
 - Construction d'un jeu de données étiqueté à partir des logs.
 - Détecteur à seuil statistique, puis détecteur ML, comparés sur les mêmes vols.
