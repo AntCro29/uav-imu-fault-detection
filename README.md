@@ -9,7 +9,7 @@ modèle de machine learning entraîné sur des vols nominaux.
 Projet en cours : collecte de vols, analyse des innovations, premier détecteur à seuil.
 Le détecteur à base de machine learning n'est pas encore implémenté.
 
-Dix-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Vingt-trois vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -28,6 +28,7 @@ Dix-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 14, 15 | automatique | Nominal, vent 3 m/s venant de 0° puis de 90°, turbulence 1 |
 | 16, 17 | automatique | Nominal, vent 6 m/s venant de 0° puis de 90°, turbulence 2 |
 | 18, 19 | automatique | Nominal, vent 9 m/s venant de 0° puis de 90°, turbulence 3 |
+| 20 à 23 | automatique | Sous vent 6 m/s venant de 0°, turbulence 2 : biais 0,5 m/s², biais 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
 vols 5 à 19 forment ainsi une série réalisée avec exactement le même protocole. Les
@@ -86,8 +87,22 @@ trajectoire n'est plus un cercle.
 **Détecteur calibré en incluant le vent** (validation croisée sur les vols 5 à 19) : aucune
 fausse alarme sur 2 250 s, mais le seuil de SV monte de 0,02 à 0,24 ; le biais de
 0,5 m/s² n'est plus détecté qu'en 2,1 s (par SP) au lieu de 0,7 s, et plus du tout avec
-un seuil de 5 × max nominal. C'est le compromis entre sensibilité et fausses alarmes. Les
-vols avec panne étant tous sans vent, la détection sous vent reste à évaluer.
+un seuil de 5 × max nominal. C'est le compromis entre sensibilité et fausses alarmes.
+
+**Pannes sous vent (vols 20 à 23, 6 m/s)**, même détecteur calibré en validation croisée
+sur les vols 5 à 23 (seuil 2 × max nominal, persistance 0,5 s ; aucune fausse alarme sur
+2 690 s de nominal) :
+
+| Panne | Sans vent | Sous vent de 6 m/s | Délai de l'EKF (≥ 1), sans / avec vent |
+|---|---|---|---|
+| Biais 0,5 m/s² | 2,1 s (SP) | 2,3 s (SP) | jamais / jamais |
+| Biais 1,0 m/s² | 1,5 s (SV + SP) | 1,5 s (SV + SP) | jamais / jamais |
+| Magnétomètre | 0,5 s (SM) | 0,5 s (SM) | 48,7 s / 29,8 s |
+| Coupure GPS 60 s | 0,7 s (perte du fix) | 0,7 s (perte du fix) | jamais / jamais |
+
+Les pannes restent détectées sous vent de 6 m/s, avec des délais comparables, une fois le
+seuil relevé pour tolérer le vent ; un seuil de 5 × max nominal manque en revanche les
+deux biais de 0,5 m/s². Un seul vol par panne sous vent.
 
 ## Version d'ArduPilot
 
@@ -225,6 +240,6 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Vols nominaux avec vent, puis réévaluation du détecteur à seuil.
+- Plus de vols avec panne sous vent (plusieurs vols par panne, autres vents).
 - Traitement de la phase qui suit le retrait d'une panne.
 - Détecteur ML, comparé au détecteur à seuil sur les mêmes vols.
