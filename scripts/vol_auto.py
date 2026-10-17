@@ -3,12 +3,22 @@
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
-Scénarios : nominal, gps60, gps30, biais10, biais05, biais (amplitude obligatoire), magneto
+Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, et (amplitude obligatoire)
+derive, gyro, bruit_gyro, bloque.
 Vent optionnel : vitesse (m/s), direction d'où il vient (degrés vrais), turbulence (m/s).
 --injection : instant d'injection en s après l'entrée en CIRCLE (120 par défaut). Le cercle
 est très régulier (un tour ≈ 30,8 s) : changer l'instant change le cap à l'injection.
---amplitude : biais en m/s² (biais*), ou décalage ajouté à la valeur de départ de
-SIM_MAG*_OFS_X (magneto, défaut +150) ; sans objet pour les coupures GPS.
+--amplitude : selon le scénario (vérifié dans le code SITL, commit 14c871f) :
+  biais : biais d'accéléromètre X des trois IMU, m/s² (SIM_ACC*_BIAS_X) ;
+  derive : valeur finale d'une rampe du même biais, atteinte à la fin des 60 s de panne
+           (un pas par seconde), m/s² ;
+  gyro : biais de gyroscope X des trois IMU, rad/s (SIM_GYR*_BIAS_X) ;
+  bruit_gyro : bruit aléatoire de gyroscope des trois IMU, ajouté sur les trois axes avec une
+               amplitude radians(valeur) × gaz (SIM_GYR*_RND, en °/s) ;
+  bloque : accéléromètre de l'IMU 1 seule forcé à cette valeur sur ses trois axes, m/s²
+           (SIM_ACCEL1_FAIL ; 0 désactive) ;
+  magneto : décalage ajouté à la valeur de départ de SIM_MAG*_OFS_X (défaut +150) ;
+  sans objet pour les coupures GPS.
 Réglé avant le décollage avec SIM_WIND_T = 1 (vent uniforme en altitude : le drone à 15 m
 subit le vent réglé ; par défaut le simulateur le réduirait de √(altitude / 60)).
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
@@ -36,6 +46,12 @@ SCENARIOS = {
     "biais": {"params": IMU, "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60},
     "magneto": {"params": ["SIM_MAG1_OFS_X", "SIM_MAG2_OFS_X", "SIM_MAG3_OFS_X"],
                 "attendu": 5.0, "injection": 155.0, "retrait": 5.0, "duree": 60},
+    "derive": {"params": IMU, "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60, "rampe": True},
+    "gyro": {"params": ["SIM_GYR1_BIAS_X", "SIM_GYR2_BIAS_X", "SIM_GYR3_BIAS_X"],
+             "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60},
+    "bruit_gyro": {"params": ["SIM_GYR1_RND", "SIM_GYR2_RND", "SIM_GYR3_RND"],
+                   "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60},
+    "bloque": {"params": ["SIM_ACCEL1_FAIL"], "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60},
 }
 CERCLE_NOMINAL = 180
 CERCLE_APRES = 90
@@ -246,17 +262,30 @@ if panne is None:
     pomper(CERCLE_NOMINAL)
 else:
     pomper(CERCLE_AVANT)
-    journal(f"Injection : {panne['params']} = {panne['injection']}")
-    regler({nom: panne["injection"] for nom in panne["params"]})
-    panne_active = True
-    pomper(panne["duree"], lambda: not panne_active)
+    if panne.get("rampe"):
+        # Dérive : la valeur monte d'un pas par seconde jusqu'à l'amplitude, atteinte à la fin
+        journal(f"Injection en rampe : {panne['params']} de 0 à {panne['injection']} en {panne['duree']} s")
+        debut = time.monotonic()
+        panne_active = True
+        for pas in range(1, panne["duree"] + 1):
+            if not panne_active:      # garde-fou d'altitude déclenché : ne pas réinjecter
+                break
+            regler({nom: panne["injection"] * pas / panne["duree"] for nom in panne["params"]})
+            if pomper(debut + pas - time.monotonic(), lambda: not panne_active):
+                break
+    else:
+        journal(f"Injection : {panne['params']} = {panne['injection']}")
+        regler({nom: panne["injection"] for nom in panne["params"]})
+        panne_active = True
+        pomper(panne["duree"], lambda: not panne_active)
     if panne_active:
         retirer()
     pomper(CERCLE_APRES)
 
 # Atterrissage
 changer_mode(RTL, "rtl")
-if not pomper(240, lambda: not etat["arme"] or (etat["alt"] is not None and etat["alt"] < 0.3)):
+# 900 s : sous 9 m/s, après une coupure GPS, le drone peut revenir de loin à ≈ 1 m/s (log 72)
+if not pomper(900, lambda: not etat["arme"] or (etat["alt"] is not None and etat["alt"] < 0.3)):
     sys.exit("Pas d'atterrissage après RTL")
 # Avec du vent, le drone posé peut rester armé : le régulateur demande encore de l'inclinaison
 # pour tenir la position, et le détecteur d'atterrissage d'ArduPilot ne conclut jamais

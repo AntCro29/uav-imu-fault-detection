@@ -10,8 +10,13 @@ d'agitation du moment, indicateur indirect du vent). Pas de décision tant que l
 30 s n'est pas remplie (32 premières secondes du cercle).
 Isolation Forest : des arbres découpent les données au hasard ; un point anormal est isolé en
 peu de coupes. Score d'anomalie = opposé de `score_samples` (plus haut = plus anormal).
-Alarme si le score dépasse le plus haut score vu sur le nominal d'apprentissage pendant
+Alarme si le score dépasse le plus haut score vu sur le nominal d'apprentissage + MARGE pendant
 0,5 s, ou si le GPS n'a pas de fix 3D (même règle que les autres détecteurs).
+Combinaison (option `combine`) : alarme si l'Isolation Forest OU le seuil adaptatif
+(detecteur_adaptatif.py, k = 6) se déclenche.
+Réglages figés le 2026-10-17 sur le jeu de validation (logs 50 à 72, 5 graines) : MARGE = 0,02
+(0 fausse alarme dès 0,01, un cran de marge en plus), 200 arbres (500 n'apportent rien),
+combinaison retenue (délai moyen ≈ 1,4 s au lieu de ≈ 2,3 s, aucune fausse alarme ajoutée).
 Métriques : celles de detecteur_seuil.py (fonction `mesurer`), plus la part de la panne
 pendant laquelle l'alarme est active.
 """
@@ -30,6 +35,7 @@ RETARD = 20         # échantillons (2 s)
 PERSISTANCE = 5     # échantillons (0,5 s)
 N_ARBRES = 200
 GRAINE = 0          # forêt tirée au hasard : graine fixée pour un résultat reproductible
+MARGE = 0.02        # ajoutée au plus haut score nominal d'apprentissage
 
 
 def caracteristiques(cercle):
@@ -55,7 +61,7 @@ def entrainer(vols, logs):
         X.append(caracteristiques(cercle)[nominal])
     X = pd.concat(X).dropna()
     modele = IsolationForest(n_estimators=N_ARBRES, random_state=GRAINE).fit(X)
-    seuil = (-modele.score_samples(X)).max()
+    seuil = (-modele.score_samples(X)).max() + MARGE
     return modele, seuil, len(X)
 
 
@@ -67,10 +73,12 @@ def scores(modele, cercle):
     return s
 
 
-def evaluer_vol(df, modele, seuil):
+def evaluer_vol(df, modele, seuil, combine=False):
     cercle = cercle_de(df)
     par_canal = {"ML": ds.persistant(scores(modele, cercle) > seuil, PERSISTANCE),
                  "GPS": ds.persistant(cercle.gps_fix.fillna(0) < ds.FIX_3D, PERSISTANCE)}
+    if combine:
+        par_canal.update({c: da.alarme_canal(cercle[c].to_numpy(), da.K) for c in ds.CANAUX})
     r = ds.mesurer(cercle, par_canal)
     panne = cercle.etiquette == "panne"
     if panne.any():

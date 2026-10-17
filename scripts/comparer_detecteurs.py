@@ -4,7 +4,8 @@ Usage : python scripts/comparer_detecteurs.py <dossier_jeu_donnees> <dernier_log
 Les logs dont le numéro est ≤ dernier_log_calibration servent à calibrer le seuil fixe (facteur 2 ×
 max nominal, persistance 0,5 s, sans validation croisée) et à entraîner l'Isolation Forest
 (detecteur_ml.py). Les logs suivants servent de test, pour tous les détecteurs. Le détecteur
-adaptatif n'utilise pas de calibration (k = 6 par défaut, plusieurs valeurs possibles).
+adaptatif n'utilise pas de calibration (k = 6 par défaut, plusieurs valeurs possibles). Dernière
+colonne : alarme si l'Isolation Forest OU le seuil adaptatif (k = 6) se déclenche.
 Exemple (2026-10-17) : calibration sur les logs 19 à 49, test sur les logs 50 à 72 :
     python scripts/comparer_detecteurs.py data/jeu_donnees 49 4 6
 """
@@ -46,13 +47,13 @@ if __name__ == "__main__":
     print(f"Entraînement de l'Isolation Forest : {n_ech / 10:.0f} s de nominal, seuil du score {seuil_ml:.3f}")
     print(f"Test sur {len(test)} logs ({min(test)} à {max(test)})\n")
 
-    noms = ["fixe"] + [f"adaptatif k={k:g}" for k in ks] + ["isolation forest"]
+    noms = ["fixe"] + [f"adaptatif k={k:g}" for k in ks] + ["isolation forest", "ML + adaptatif"]
     print(f"{'log':>4} {'panne':<10} " + " ".join(f"{nm:<16}" for nm in noms) + "  FA nominal")
     res = {nm: [] for nm in noms}
     for n in test:
         df = vols[n]
         rs = ([ds.evaluer_vol(df, seuil, PERSISTANCE)] + [da.evaluer_vol(df, k) for k in ks]
-              + [ml.evaluer_vol(df, modele, seuil_ml)])
+              + [ml.evaluer_vol(df, modele, seuil_ml), ml.evaluer_vol(df, modele, seuil_ml, combine=True)])
         for nm, r in zip(noms, rs):
             res[nm].append(r)
         panne = da.nom_panne(df)

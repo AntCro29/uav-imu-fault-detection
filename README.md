@@ -289,8 +289,14 @@ exécute la procédure manuelle décrite ci-dessous en pymavlink, attend le
 désarmement puis arrête le SITL. Il attend que les deux cœurs EKF utilisent le GPS
 avant de passer en GUIDED, vérifie chaque réglage et l'acceptation du décollage, et
 retire la panne si l'altitude descend sous 8 m. Le journal du vol est écrit dans
-`data/`. Scénarios : `nominal`, `gps60`, `gps30`, `biais10`, `biais05`, `biais` (avec
-`--amplitude`), `magneto`. Le vent optionnel (m/s, degrés d'où il vient, m/s) est réglé avant
+`data/`. Scénarios : `nominal`, `gps60`, `gps30`, `biais10`, `biais05`, `magneto`, et avec
+`--amplitude` : `biais` (biais d'accéléromètre X des trois IMU, m/s²), `derive` (même biais en
+rampe sur les 60 s de panne, valeur finale en m/s²), `gyro` (biais de gyroscope X des trois IMU,
+rad/s), `bruit_gyro` (bruit aléatoire de gyroscope des trois IMU, `SIM_GYR*_RND`, amplitude
+radians(valeur) × gaz) et `bloque` (accéléromètre de l'IMU 1 seule forcé à cette valeur sur ses
+trois axes, `SIM_ACCEL1_FAIL`). Le bruit d'accéléromètre `SIM_ACC*_RND` n'est pas utilisé : dans
+le simulateur, il n'agit que si une vibration (`SIM_VIB_FREQ` ou `SIM_VIB_MOT_MAX`) est réglée.
+Le vent optionnel (m/s, degrés d'où il vient, m/s) est réglé avant
 le décollage, uniforme en altitude. `--injection` fixe l'instant d'injection après l'entrée en
 CIRCLE (120 s par défaut) : le cercle étant très régulier (un tour ≈ 31 s), il fixe aussi le cap
 du drone au début de la panne. `--amplitude` fixe le biais (m/s²) ou le décalage magnétomètre. Par vent fort, le drone posé peut rester armé (le détecteur
