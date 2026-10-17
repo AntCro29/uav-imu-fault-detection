@@ -6,10 +6,11 @@ modèle de machine learning entraîné sur des vols nominaux.
 
 ## État actuel
 
-Projet en cours : collecte de vols, analyse des innovations, premier détecteur à seuil.
-Le détecteur à base de machine learning n'est pas encore implémenté.
+Projet en cours : collecte de vols, analyse des innovations, détecteurs à seuil (seuil fixe,
+puis seuil qui s'adapte au niveau des innovations). Le détecteur à base de machine learning
+n'est pas encore implémenté.
 
-Trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Cinquante-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -30,11 +31,18 @@ Trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 18, 19 | automatique | Nominal, vent 9 m/s venant de 0° puis de 90°, turbulence 3 |
 | 20 à 23 | automatique | Sous vent 6 m/s venant de 0°, turbulence 2 : biais 0,5 m/s², biais 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
 | 24 à 31 | automatique | Mêmes quatre pannes sous vent 6 m/s venant de 90° et de 180°, injection à 128, 135 ou 143 s (deux vols par panne) |
+| 32, 33 | automatique | Biais de 0,2 puis 0,3 m/s², sans vent |
+| 34, 35 | automatique | Biais de 0,2 puis 0,3 m/s², vent 6 m/s venant de 0°, turbulence 2 |
+| 36 à 41 | automatique | Nominal : deux vols sans vent ; 4,5 m/s venant de 45° et de 225°, turbulence 1,5 ; 7,5 m/s venant de 135° et de 315°, turbulence 2,5 |
+| 42 à 46 | automatique | Sous vent 3 m/s venant de 0°, turbulence 1 : biais 0,2, 0,3 et 0,5 m/s², décalage magnétomètre, coupure GPS de 60 s |
+| 47 à 50 | automatique | Biais de 0,2 puis 0,3 m/s² sous vent 6 m/s venant de 90° (injection à 135 s) et de 180° (injection à 143 s) |
+| 51 à 58 | automatique | Sous vent 9 m/s venant de 0° (injection à 120 s) puis de 90° (injection à 135 s), turbulence 3 : biais 0,5 et 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 31 forment ainsi une série réalisée avec exactement le même protocole. Les
-vols 12 à 31 ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
-uniforme en altitude (`SIM_WIND_T = 1`).
+vols 5 à 58 forment ainsi une série réalisée avec exactement le même protocole. À partir
+du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
+uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols 32, 33, 36 et 37, sans vent. Les vols 36
+à 58 n'ont servi à aucun réglage : ils forment le jeu de test du seuil adaptatif.
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
 d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
@@ -110,6 +118,62 @@ varie le plus est la durée de l'état dégradé après le retrait (biais 1,0 : 
 magnétomètre : 82 à 90 s). Limites : trois vols par panne, un seul niveau de vent, direction
 du vent et cap d'injection modifiés ensemble.
 
+### Limite de détection (vols 32 à 35)
+
+Biais de 0,2 et 0,3 m/s², sans vent et sous vent de 6 m/s, avec le même détecteur
+(validation croisée sur les vols 5 à 35, seuils SV / SP / SM = 0,24 / 0,04 / 0,08) : le biais
+de 0,2 m/s² n'est détecté ni sans vent ni sous vent ; le biais de 0,3 m/s² l'est en 3,1 s
+sans vent et 3,7 s sous vent (par SP). La limite de détection de ce détecteur se situe entre
+0,2 et 0,3 m/s². Sans vent, le maximum de SV pendant la panne suit à peu près le biais
+(0,08 / 0,12 / 0,21 / 0,42 pour 0,2 / 0,3 / 0,5 / 1,0 m/s², soit SV ≈ 0,42 × biais). Un
+détecteur calibré uniquement sur les vols sans vent (seuils 0,02) détecte le biais de 0,2 m/s²
+en 1,1 s, mais il est inutilisable dès qu'il y a du vent (voir le tableau plus haut). Un vol
+par amplitude.
+
+### Seuil adaptatif, testé sur des vols jamais vus (vols 36 à 58)
+
+Plutôt qu'un seuil unique, réglé pour le pire vent rencontré, le seuil de chaque canal suit le
+niveau récent des innovations : seuil = max(0,02 ; moyenne + k × écart-type) sur les 30 s qui
+précèdent (fenêtre décalée de 2 s), figé pendant une alarme pour que la panne ne relève pas son
+propre seuil. Persistance 0,5 s et règle GPS identiques au seuil fixe. Le réglage (k, fenêtre,
+plancher) a été choisi sur les vols 5 à 35, puis figé avant les vols 36 à 58, qui servent de
+test : 3 026 s de nominal et 17 pannes, sous des vents de 0 à 9 m/s, dont des vitesses et des
+directions jamais vues. Le seuil fixe est calibré sur les vols 5 à 35.
+
+| Panne (vols de test) | Seuil fixe | Seuil adaptatif, k = 6 |
+|---|---|---|
+| Biais 0,2 m/s², 3 m/s | manqué | 1,5 s (SV) |
+| Biais 0,2 m/s², 6 m/s (×2) | 22,7 et 23,7 s (SP) | 4,6 s (SM, ×2) |
+| Biais 0,3 m/s², 3 m/s | 2,9 s (SP) | 1,1 s (SV) |
+| Biais 0,3 m/s², 6 m/s (×2) | 3,5 et 3,7 s (SP) | 1,5 et 1,9 s (SV) |
+| Biais 0,5 m/s², 3 et 9 m/s (×3) | 2,1 à 2,9 s (SP) | 0,9 à 1,9 s (SV) |
+| Biais 1,0 m/s², 9 m/s (×2) | 1,7 s (SV) | 1,1 et 1,3 s (SV) |
+| Magnétomètre, 3 et 9 m/s (×3) | 0,5 s (SM) | 0,5 s (SM) |
+| Coupure GPS 60 s, 3 et 9 m/s (×3) | 0,7 s (perte du fix) | 0,7 s (perte du fix) |
+| **Fausses alarmes (3 026 s de nominal)** | **0** | **0** |
+
+Avec k = 4, les 17 pannes sont aussi détectées, un peu plus vite, mais avec 2 fausses alarmes
+(vol 40, 7,5 m/s) : SM passe à 0,03 alors que le seuil est au plancher de 0,02, les
+innovations étant arrondies au centième. Sur les vols de réglage, k = 4 semblait pourtant le
+meilleur choix (k = 6 y manquait le biais de 0,2 m/s² sous vent) : le test sur des vols
+nouveaux a inversé le classement. Le seuil calibré sans vent (0,02) fait 501 fausses alarmes
+sur ces mêmes vols.
+
+Limites : un seul vol par configuration ; pour les petits biais sous vent, l'alarme ne reste
+pas active pendant toute la panne (20 à 36 % de la durée de panne pour les vols 47 à 49) :
+une fois l'alarme retombée, la fenêtre contient des valeurs de panne et le seuil remonte. Un
+seuil adaptatif peut ainsi « absorber » une panne lente.
+
+**Vent fort (9 m/s)** : les innovations pendant un biais sont plus fortes que sans vent
+(maximum de SV 0,33-0,35 pour 0,5 m/s², 0,58-0,61 pour 1,0 m/s², contre 0,21 et 0,42), la
+relation SV ≈ 0,42 × biais ne vaut donc que sans vent. Au vol 58 (coupure GPS sous 9 m/s
+venant de 90°), le drone a dérivé sous le vent jusqu'à environ 900 m du point de départ
+pendant la coupure, sans que l'EKF le voie (sans GPS, il suppose une vitesse nulle et
+n'estime pas le vent dans cette configuration) ; au retour du GPS, il remonte le vent en
+butée d'inclinaison (30°, `ATC_ANGLE_MAX`) à environ 1 m/s et n'était pas revenu à la fin du
+vol. La panne et les 90 s qui suivent sont complètes dans le log. Au vol 54 (même panne, vent
+de 0°), la dérive mesurée n'a pas dépassé 116 m : différence non expliquée.
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -135,6 +199,11 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/detecteur_seuil.py <dossier_jeu_donnees> [facteur persistance]` : détecteur
   à seuil évalué en validation croisée. Sans argument, balaye plusieurs réglages ; avec,
   détail vol par vol (délai, canal, comparaison avec la porte de l'EKF, alarmes après panne).
+- `scripts/detecteur_adaptatif.py <dossier_jeu_donnees> [k]` : détecteur à seuil adaptatif
+  (k = 6 par défaut), détail vol par vol avec les mêmes métriques que le seuil fixe.
+- `scripts/comparer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> [k ...]` :
+  seuil fixe calibré sur les logs jusqu'à `dernier_log_calibration`, seuil adaptatif, tous deux
+  évalués sur les logs suivants (vols jamais vus).
 - `scripts/construire_jeu_donnees.py <dossier> <log.BIN> [...]` : jeu de données
   étiqueté, un CSV par log (innovations du cœur 0 à 10 Hz, statut GPS, phase du vol,
   type et amplitude de panne, étiquette `nominal` / `panne` / `apres_panne`, temps
@@ -251,7 +320,8 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Limite de détection : biais d'accéléromètre de 0,2 et 0,3 m/s², sans vent et sous vent.
-- Pannes sous vent fort (9 m/s).
+- Répéter les vols de test pour mesurer la variabilité du seuil adaptatif (un seul vol par
+  configuration pour l'instant), et traiter le cas des pannes lentes « absorbées » par le seuil.
 - Traitement de la phase qui suit le retrait d'une panne.
+- Pannes sur un seul capteur (comparaison entre capteurs redondants), dérive, bruit, capteur bloqué.
 - Détecteur ML, comparé au détecteur à seuil sur les mêmes vols.

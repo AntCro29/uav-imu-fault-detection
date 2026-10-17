@@ -57,6 +57,14 @@ def evaluer_vol(df, seuil, persistance, regle_gps=True):
     if regle_gps:
         # Pas de fix 3D : le GPS s'annonce lui-même en panne, sans attendre les innovations
         par_canal["GPS"] = persistant(cercle.gps_fix.fillna(0) < FIX_3D, persistance)
+    return mesurer(cercle, par_canal)
+
+
+def mesurer(cercle, par_canal):
+    """Métriques d'un vol à partir des alarmes par canal (séries booléennes alignées sur `cercle`).
+
+    Partagé avec le détecteur adaptatif, pour que les deux soient évalués de la même façon.
+    """
     alarme = pd.concat(par_canal.values(), axis=1).any(axis=1)
     fronts = alarme & ~alarme.shift(1, fill_value=False)   # début de chaque alarme
 
