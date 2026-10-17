@@ -1,11 +1,11 @@
-"""Compare le détecteur à seuil fixe et le détecteur adaptatif sur des vols jamais vus.
+"""Compare le seuil fixe, le seuil adaptatif et l'Isolation Forest sur des vols jamais vus.
 
 Usage : python scripts/comparer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> [k ...]
 Les logs dont le numéro est ≤ dernier_log_calibration servent à calibrer le seuil fixe (facteur 2 ×
-max nominal, persistance 0,5 s, sans validation croisée). Les logs suivants servent de test, pour
-les deux détecteurs. Le détecteur adaptatif n'utilise pas de calibration (k = 6 par défaut,
-plusieurs valeurs possibles).
-Exemple (2026-10-16) : calibration sur les logs 19 à 49, test sur les logs 50 à 72 :
+max nominal, persistance 0,5 s, sans validation croisée) et à entraîner l'Isolation Forest
+(detecteur_ml.py). Les logs suivants servent de test, pour tous les détecteurs. Le détecteur
+adaptatif n'utilise pas de calibration (k = 6 par défaut, plusieurs valeurs possibles).
+Exemple (2026-10-17) : calibration sur les logs 19 à 49, test sur les logs 50 à 72 :
     python scripts/comparer_detecteurs.py data/jeu_donnees 49 4 6
 """
 import os
@@ -15,6 +15,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detecteur_seuil as ds
 import detecteur_adaptatif as da
+import detecteur_ml as ml
 
 FACTEUR = 2
 PERSISTANCE = 5
@@ -41,14 +42,17 @@ if __name__ == "__main__":
     seuil = {c: FACTEUR * nominal[c].max() for c in ds.CANAUX}
     print(f"Calibration du seuil fixe sur {len(calib)} logs ({min(calib)} à {max(calib)}) : "
           + ", ".join(f"{c} {v:.2f}" for c, v in seuil.items()))
+    modele, seuil_ml, n_ech = ml.entrainer(vols, calib)
+    print(f"Entraînement de l'Isolation Forest : {n_ech / 10:.0f} s de nominal, seuil du score {seuil_ml:.3f}")
     print(f"Test sur {len(test)} logs ({min(test)} à {max(test)})\n")
 
-    noms = ["fixe"] + [f"adaptatif k={k:g}" for k in ks]
+    noms = ["fixe"] + [f"adaptatif k={k:g}" for k in ks] + ["isolation forest"]
     print(f"{'log':>4} {'panne':<10} " + " ".join(f"{nm:<16}" for nm in noms) + "  FA nominal")
     res = {nm: [] for nm in noms}
     for n in test:
         df = vols[n]
-        rs = [ds.evaluer_vol(df, seuil, PERSISTANCE)] + [da.evaluer_vol(df, k) for k in ks]
+        rs = ([ds.evaluer_vol(df, seuil, PERSISTANCE)] + [da.evaluer_vol(df, k) for k in ks]
+              + [ml.evaluer_vol(df, modele, seuil_ml)])
         for nm, r in zip(noms, rs):
             res[nm].append(r)
         panne = da.nom_panne(df)

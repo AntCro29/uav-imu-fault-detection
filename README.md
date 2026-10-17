@@ -7,8 +7,9 @@ modèle de machine learning entraîné sur des vols nominaux.
 ## État actuel
 
 Projet en cours : collecte de vols, analyse des innovations, détecteurs à seuil (seuil fixe,
-puis seuil qui s'adapte au niveau des innovations). Le détecteur à base de machine learning
-n'est pas encore implémenté.
+puis seuil qui s'adapte au niveau des innovations) et premier détecteur par machine learning
+(Isolation Forest entraîné sur des vols nominaux), comparés sur des vols de test. La
+classification du type de panne et la récupération ne sont pas encore abordées.
 
 Cinquante-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
@@ -174,6 +175,49 @@ butée d'inclinaison (30°, `ATC_ANGLE_MAX`) à environ 1 m/s et n'était pas re
 vol. La panne et les 90 s qui suivent sont complètes dans le log. Au vol 54 (même panne, vent
 de 0°), la dérive mesurée n'a pas dépassé 116 m : différence non expliquée.
 
+### Détecteur ML : Isolation Forest (mêmes vols de test)
+
+Un Isolation Forest (scikit-learn) est entraîné **uniquement sur du vol nominal** (vols 5 à 35,
+3 454 s) : il n'a jamais vu de panne. Ses arbres découpent les données au hasard ; un point
+anormal est isolé en peu de coupes. Pour chaque canal (SV, SP, SM), il reçoit 4 variables
+calculées sur le passé seulement : valeur instantanée, moyenne et maximum sur 3 s, et
+écart-type sur 30 s décalé de 2 s, qui mesure l'agitation du moment (indicateur indirect du
+vent, que l'EKF n'estime pas ici). Alarme si le score d'anomalie dépasse le plus haut score
+vu sur le nominal d'entraînement pendant 0,5 s, ou si le GPS perd son fix 3D. Réglages fixés
+avant le test.
+
+| Panne (vols de test) | Seuil fixe | Seuil adaptatif, k = 6 | Isolation Forest |
+|---|---|---|---|
+| Biais 0,2 m/s², 3 m/s | manqué | 1,5 s | 2,8 s |
+| Biais 0,2 m/s², 6 m/s (×2) | 22,7 et 23,7 s | 4,6 s (×2) | 3,5 et 3,0 s |
+| Biais 0,3 m/s² (×3) | 2,9 à 3,7 s | 1,1 à 1,9 s | 2,0 à 2,8 s |
+| Biais 0,5 m/s² (×3) | 2,1 à 2,9 s | 0,9 à 1,9 s | 1,5 à 2,0 s |
+| Biais 1,0 m/s² (×2) | 1,7 s | 1,1 et 1,3 s | 1,5 et 1,6 s |
+| Magnétomètre (×3) | 0,5 s | 0,5 s | 1,7 à 2,7 s |
+| Coupure GPS 60 s (×3) | 0,7 s | 0,7 s | 0,7 s |
+| Part de la panne en alarme, biais 0,2-0,3 sous 6 m/s (vols 47 à 49) | 2 à 17 % | 20 à 36 % | 64 à 82 % |
+| **Fausses alarmes (3 026 s de nominal)** | **0** | **0** | **0** |
+
+Le modèle détecte les 17 pannes. Il est un peu plus lent que le seuil adaptatif sur la
+plupart d'entre elles, mais plus rapide sur le cas le plus difficile (biais de 0,2 m/s² sous
+vent), et surtout il garde l'alarme active pendant la panne au lieu de l'« absorber ». Son
+état dégradé après retrait dure plus longtemps (souvent encore actif 90 s après le retrait
+pour le biais de 1,0 m/s² et le magnétomètre).
+
+**Lenteur sur la panne magnétomètre (vérifiée au vol 45)** : le score saute dès le premier
+échantillon de panne puis plafonne, que SM vaille 0,39 ou 0,98. Un Isolation Forest mesure
+combien de variables sortent du domaine vu à l'entraînement, pas de combien elles en sortent :
+il n'extrapole pas. L'alarme n'est franchie qu'une fois la moyenne sur 3 s sortie à son tour
+du domaine connu.
+
+**Robustesse au tirage aléatoire** (graines 0 à 4, mêmes réglages) : 17 / 17 pannes détectées
+pour les cinq graines, délais stables à ± 0,5 s près ; 0 fausse alarme pour quatre graines,
+3 pour la cinquième (vols 40 et 51, score à peine au-dessus du seuil, aux mêmes instants que
+les fausses alarmes du seuil adaptatif avec k = 4). Le tableau ci-dessus utilise la graine 0,
+un tirage plutôt favorable. Avec un seuil égal au maximum vu à l'entraînement, la marge est
+mince ; il n'a pas été retouché après avoir vu les vols de test. Un seul vol par configuration
+de test.
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -202,8 +246,13 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/detecteur_adaptatif.py <dossier_jeu_donnees> [k]` : détecteur à seuil adaptatif
   (k = 6 par défaut), détail vol par vol avec les mêmes métriques que le seuil fixe.
 - `scripts/comparer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> [k ...]` :
-  seuil fixe calibré sur les logs jusqu'à `dernier_log_calibration`, seuil adaptatif, tous deux
-  évalués sur les logs suivants (vols jamais vus).
+  seuil fixe calibré et Isolation Forest entraîné sur les logs jusqu'à
+  `dernier_log_calibration`, seuil adaptatif ; tous évalués sur les logs suivants (vols jamais vus).
+- `scripts/detecteur_ml.py <dossier_jeu_donnees> <dernier_log_apprentissage>` : Isolation
+  Forest entraîné sur le nominal des logs jusqu'à `dernier_log_apprentissage`, détail vol par vol
+  sur les logs suivants (délai, part de la panne en alarme, fausses alarmes, état dégradé).
+  Pour l'affiner avec de nouveaux vols : générer leurs CSV avec `construire_jeu_donnees.py`
+  et relancer, le modèle est ré-entraîné à chaque exécution.
 - `scripts/construire_jeu_donnees.py <dossier> <log.BIN> [...]` : jeu de données
   étiqueté, un CSV par log (innovations du cœur 0 à 10 Hz, statut GPS, phase du vol,
   type et amplitude de panne, étiquette `nominal` / `panne` / `apres_panne`, temps
@@ -324,4 +373,6 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
   configuration pour l'instant), et traiter le cas des pannes lentes « absorbées » par le seuil.
 - Traitement de la phase qui suit le retrait d'une panne.
 - Pannes sur un seul capteur (comparaison entre capteurs redondants), dérive, bruit, capteur bloqué.
-- Détecteur ML, comparé au détecteur à seuil sur les mêmes vols.
+- Détecteur ML : nouvelle campagne de vols de test (le seuil du score n'a pas pu être réglé sans
+  biaiser le test actuel), combinaison avec le seuil adaptatif, autoencodeur.
+- Classification du type de panne, puis stratégies de récupération.
