@@ -29,27 +29,41 @@ PLANCHER = 0.02    # innovations quantifiées à 0,01 : sans plancher, le seuil 
 PERSISTANCE = 5    # échantillons (0,5 s)
 
 
-def alarme_canal(x, k):
-    """Alarme (persistante) d'un canal, x étant le tableau numpy des innovations du cercle."""
-    n = len(x)
-    actif = np.zeros(n, dtype=bool)
-    compte = 0
-    fige = None
-    for i in range(n):
-        if fige is not None:
-            s = fige
+class SeuilAdaptatif:
+    """Seuil adaptatif d'un canal, un échantillon à la fois : sert après coup et en vol."""
+
+    def __init__(self, k=K):
+        self.k = k
+        self.passe = []       # innovations reçues depuis l'entrée en cercle
+        self.compte = 0       # échantillons consécutifs au-dessus du seuil
+        self.fige = None
+        self.seuil = None     # seuil appliqué au dernier échantillon (None : fenêtre pas remplie)
+
+    def ajouter(self, x):
+        """Ajoute une innovation, renvoie l'alarme (persistante) à cet instant."""
+        self.passe.append(x)
+        i = len(self.passe) - 1
+        if self.fige is not None:
+            s = self.fige
         elif i >= FENETRE + RETARD:
-            w = x[i - RETARD - FENETRE:i - RETARD]
-            s = max(PLANCHER, w.mean() + k * w.std())
+            w = np.asarray(self.passe[i - RETARD - FENETRE:i - RETARD])
+            s = max(PLANCHER, w.mean() + self.k * w.std())
         else:
             s = None          # fenêtre pas encore remplie : pas de décision
-        compte = compte + 1 if s is not None and x[i] > s else 0
-        actif[i] = compte >= PERSISTANCE
-        if actif[i] and fige is None:
-            fige = s          # début d'alarme : on fige le seuil
-        elif not actif[i] and compte == 0:
-            fige = None
-    return pd.Series(actif)
+        self.seuil = s
+        self.compte = self.compte + 1 if s is not None and x > s else 0
+        actif = self.compte >= PERSISTANCE
+        if actif and self.fige is None:
+            self.fige = s     # début d'alarme : on fige le seuil
+        elif not actif and self.compte == 0:
+            self.fige = None
+        return actif
+
+
+def alarme_canal(x, k):
+    """Alarme (persistante) d'un canal, x étant le tableau numpy des innovations du cercle."""
+    canal = SeuilAdaptatif(k)
+    return pd.Series([canal.ajouter(v) for v in x])
 
 
 def evaluer_vol(df, k=K):

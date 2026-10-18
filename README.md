@@ -9,10 +9,11 @@ modèle de machine learning entraîné sur des vols nominaux.
 Projet en cours : collecte de vols, analyse des innovations, détecteurs à seuil (seuil fixe,
 puis seuil qui s'adapte au niveau des innovations) et premier détecteur par machine learning
 (Isolation Forest entraîné sur des vols nominaux), comparés puis combinés sur une campagne de
-test de 60 vols neufs, dont quatre types de panne jamais vus pendant les réglages. La
-classification du type de panne et la récupération ne sont pas encore abordées.
+test de 60 vols neufs, dont quatre types de panne jamais vus pendant les réglages. Les quatre
+détecteurs tournent aussi en vol, sur le flux MAVLink, avec les mêmes alarmes que l'analyse des
+logs. La classification du type de panne et la récupération ne sont pas encore abordées.
 
-Cent vingt-quatre vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -46,9 +47,10 @@ Cent vingt-quatre vols ont été réalisés en SITL (ArduCopter, vol en cercle) 
 | 110 à 115 | automatique | Campagne de test, biais de gyroscope X des trois IMU (0,01 et 0,02 rad/s), sans vent, 3 et 6 m/s |
 | 116 à 121 | automatique | Campagne de test, bruit de gyroscope des trois IMU (`SIM_GYR*_RND` 30 et 60), sans vent, 3 et 6 m/s |
 | 122 à 124 | automatique | Campagne de test, accéléromètre de l'IMU 1 seule bloqué à 0,01 m/s² sur ses trois axes, sans vent, 3 et 6 m/s |
+| 125 à 128 | automatique | Détecteur en vol : nominal sous vent 6 m/s venant de 30°, turbulence 2 ; biais 0,3 m/s² sans vent ; décalage magnétomètre sous vent 6 m/s venant de 240°, turbulence 2 ; dérive 0,5 m/s² sans vent |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 124 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 128 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -283,6 +285,43 @@ Limites : trois vols par configuration ; 0 fausse alarme sur 60 vols signifie se
 la règle de trois, que le taux réel est probablement inférieur à environ 5 % des vols ;
 simulation sans vibrations des moteurs ; une seule graine pour l'Isolation Forest.
 
+### Détecteur en vol (vols 125 à 128)
+
+Jusqu'ici, les alarmes étaient calculées après le vol, sur le log complet. Pour pouvoir un jour
+déclencher une récupération, le détecteur doit décider pendant le vol, à chaque nouvelle mesure,
+sans connaître la suite. Les quatre détecteurs ont donc été réécrits pour traiter un échantillon
+à la fois (`scripts/detecteur_en_ligne.py`), avec les réglages figés du test final, et branchés
+sur le vol automatique (`vol_auto.py --detecteur`). En vol, les innovations arrivent par le
+message MAVLink `EKF_STATUS_REPORT`, demandé à 10 Hz : d'après le code d'ArduPilot, ce sont les
+mêmes grandeurs que XKF4, mais celles du cœur EKF principal et sans l'arrondi au centième du log,
+que le détecteur reproduit. Le détecteur ne fait que signaler : il n'agit pas sur le drone.
+
+Deux vérifications :
+
+- **Sans voler** : les 60 vols de test, rejoués un échantillon à la fois dans le détecteur en
+  vol, donnent exactement les mêmes alarmes que l'analyse après coup, à chaque instant (0 écart).
+  Les résultats du test final n'utilisaient donc aucune mesure future. Calcul : environ 6 ms par
+  échantillon, pour 100 ms disponibles.
+- **En vol** (vols 125 à 128, `scripts/comparer_en_ligne.py`) : la trace écrite pendant le vol
+  est comparée à l'analyse du log du même vol. Un message toutes les 100 ms (99,9 % des
+  intervalles entre 80 et 120 ms, plus long trou 120 ms) ; horloges décalées d'au plus 0,05 s ;
+  valeurs identiques à celles du log à 100 % sur trois vols, et à 95,4 % sur le vol 126, où les
+  écarts sont presque tous un décalage d'un échantillon (8 échantillons sur 2 700 restent
+  inexpliqués).
+
+| Vol | Panne | Seuil fixe | Seuil adaptatif | Isolation Forest | ML + adaptatif |
+|---|---|---|---|---|---|
+| 125 | aucune (vent 6 m/s) | — | — | — | — |
+| 126 | biais 0,3 m/s² | 3,0 s (2,9 s après coup) | 1,1 s | 2,4 s | 1,1 s |
+| 127 | magnétomètre | 0,5 s | 0,5 s | 2,5 s | 0,5 s |
+| 128 | dérive 0,5 m/s² | 55,3 s | après le retrait | 19,8 s | 19,8 s |
+
+Délais en vol, identiques à l'analyse après coup sauf mention, et aucune fausse alarme. Critère
+fixé avant les vols (mêmes pannes détectées, délais à ± 0,3 s, aucune fausse alarme) : respecté
+sur les quatre vols. Limites : un vol par panne ; le détecteur tourne sur l'ordinateur qui pilote
+la simulation, comme sur une station sol, et la simulation tourne sur la même machine (ni vraie
+radio, ni pertes de messages).
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -317,6 +356,14 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/tracer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> <log> <image.png> [titre]` :
   un vol avec ce que voient les quatre détecteurs (innovations et seuils, score de l'Isolation
   Forest, alarmes). Résultat sur le vol 104 : `docs/figures/test_derive_vol104.png`.
+- `scripts/detecteur_en_ligne.py preparer <dossier_jeu_donnees> <dernier_log_calibration> <fichier.joblib>` :
+  calibre et entraîne les quatre détecteurs comme `comparer_detecteurs.py` et les enregistre ;
+  `scripts/detecteur_en_ligne.py rejouer <fichier.joblib> <dossier_jeu_donnees> [log ...]` : fait
+  passer les CSV un échantillon à la fois dans le détecteur en vol et vérifie que ses alarmes sont
+  identiques à celles de l'analyse après coup.
+- `scripts/comparer_en_ligne.py <trace.csv> <dossier_jeu_donnees> <log>` : compare la trace d'un
+  vol fait avec `--detecteur` à l'analyse du log du même vol (débit, décalage d'horloge, valeurs,
+  délais et fausses alarmes).
 - `scripts/detecteur_ml.py <dossier_jeu_donnees> <dernier_log_apprentissage>` : Isolation
   Forest entraîné sur le nominal des logs jusqu'à `dernier_log_apprentissage`, détail vol par vol
   sur les logs suivants (délai, part de la panne en alarme, fausses alarmes, état dégradé).
@@ -371,6 +418,15 @@ CIRCLE (120 s par défaut) : le cercle étant très régulier (un tour ≈ 31 s)
 du drone au début de la panne. `--amplitude` fixe le biais (m/s²) ou le décalage magnétomètre. Par vent fort, le drone posé peut rester armé (le détecteur
 d'atterrissage d'ArduPilot ne conclut pas tant que le régulateur demande de
 l'inclinaison contre le vent) : le script le désarme alors après 15 s au sol.
+
+Avec `--detecteur`, les quatre détecteurs tournent pendant le cercle : chaque début et fin
+d'alarme est écrit dans le journal, et toutes les mesures dans `data/en_ligne_<date>.csv`. Le
+détecteur se prépare une fois, à partir du jeu de données des vols d'apprentissage :
+
+```bash
+python scripts/detecteur_en_ligne.py preparer data/jeu_donnees 49 data/detecteur_en_ligne.joblib
+scripts/lancer_vol.sh biais --amplitude 0.3 --detecteur
+```
 
 ### Vol manuel
 
@@ -444,9 +500,12 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
+- Récupération : sur alarme du détecteur en vol, faire atterrir le drone, et comparer à « ne rien
+  faire » et au failsafe EKF d'ArduPilot, avec l'erreur de navigation réelle (position simulée
+  contre position estimée).
 - Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
   saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.
 - Pannes sur un seul capteur (comparaison entre capteurs redondants) ; ajout de vibrations des
   moteurs dans la simulation, pour un nominal plus réaliste.
 - Traitement de la phase qui suit le retrait d'une panne.
-- Classification du type de panne, puis stratégies de récupération.
+- Classification du type de panne.

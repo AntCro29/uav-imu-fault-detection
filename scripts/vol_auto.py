@@ -1,7 +1,7 @@
 """Vol SITL automatique selon la procédure du projet, piloté en pymavlink au lieu de MAVProxy.
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
-                           [--injection T] [--amplitude A]
+                           [--injection T] [--amplitude A] [--detecteur]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, et (amplitude obligatoire)
 derive, gyro, bruit_gyro, bloque.
@@ -21,6 +21,11 @@ est très régulier (un tour ≈ 30,8 s) : changer l'instant change le cap à l'
   sans objet pour les coupures GPS.
 Réglé avant le décollage avec SIM_WIND_T = 1 (vent uniforme en altitude : le drone à 15 m
 subit le vent réglé ; par défaut le simulateur le réduirait de √(altitude / 60)).
+--detecteur : fait tourner pendant le cercle les quatre détecteurs (detecteur_en_ligne.py), à
+partir de data/detecteur_en_ligne.joblib (créé par `detecteur_en_ligne.py preparer`). Les
+innovations arrivent par EKF_STATUS_REPORT, demandé à 10 Hz, tronquées au centième comme XKF4.
+Chaque échantillon est écrit dans data/en_ligne_<date>.csv, chaque début et fin d'alarme dans le
+journal. Aucune action sur le drone : le vol se déroule comme sans l'option.
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -32,9 +37,14 @@ par défaut), injection (tous les paramètres envoyés d'affilée), durée de la
 Puis mode rtl et attente du désarmement.
 """
 import argparse
+import csv
+import os
 import sys
 import time
 from pymavlink import mavutil
+
+DEPOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FICHIER_DETECTEUR = os.path.join(DEPOT, "data", "detecteur_en_ligne.joblib")
 
 IMU = ["SIM_ACC1_BIAS_X", "SIM_ACC2_BIAS_X", "SIM_ACC3_BIAS_X"]
 SCENARIOS = {
@@ -64,6 +74,7 @@ arguments.add_argument("scenario", choices=list(SCENARIOS))
 arguments.add_argument("vent", nargs="*", type=float, help="vitesse (m/s) direction (deg) turbulence (m/s)")
 arguments.add_argument("--injection", type=float, default=120.0, help="instant d'injection après l'entrée en CIRCLE (s)")
 arguments.add_argument("--amplitude", type=float, help="biais (m/s²) ou décalage magnétomètre à injecter")
+arguments.add_argument("--detecteur", action="store_true", help="fait tourner les détecteurs pendant le cercle")
 args = arguments.parse_args()
 if len(args.vent) not in (0, 3):
     arguments.error("le vent demande trois valeurs : vitesse direction turbulence")
@@ -90,7 +101,10 @@ t_debut = time.monotonic()
 t_cercle = None
 override = False
 panne_active = False
+en_cercle = False
 dernier_envoi = 0.0
+detecteur = trace = None
+alarmes = {}
 
 
 def journal(texte):
@@ -117,6 +131,20 @@ journal(f"Connecté au SITL, scénario {args.scenario}, vent {vent}, injection �
         + ("" if panne is None else f", valeur injectée {panne['injection']:g}"))
 m.mav.request_data_stream_send(1, 1, mavutil.mavlink.MAV_DATA_STREAM_ALL, 4, 1)
 
+if args.detecteur:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import detecteur_en_ligne as enligne
+    detecteur = enligne.charger(FICHIER_DETECTEUR)
+    alarmes = {nom: False for nom in enligne.NOMS}
+    # 10 Hz, comme XKF4 (intervalle en µs)
+    m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                            mavutil.mavlink.MAVLINK_MSG_ID_EKF_STATUS_REPORT, 100000, 0, 0, 0, 0, 0)
+    chemin_trace = os.path.join(DEPOT, "data", f"en_ligne_{time.strftime('%Y%m%d-%H%M%S')}.csv")
+    fichier_trace = open(chemin_trace, "w", newline="")
+    trace = csv.writer(fichier_trace)
+    trace.writerow(["t_cercle_s", "SV", "SP", "SM", "gps_fix", "score_ml"] + enligne.NOMS)
+    journal(f"Détecteur en ligne chargé ({FICHIER_DETECTEUR}), trace : {chemin_trace}")
+
 
 def traiter(msg):
     genre = msg.get_type()
@@ -136,6 +164,17 @@ def traiter(msg):
             etat["ekf_gps"].add(msg.text.split()[1])
     elif genre == "COMMAND_ACK" and msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
         etat["ack_takeoff"] = msg.result
+    elif genre == "EKF_STATUS_REPORT" and detecteur is not None and en_cercle:
+        v = {c: enligne.quantifier(getattr(msg, champ)) for c, champ in
+             (("SV", "velocity_variance"), ("SP", "pos_horiz_variance"), ("SM", "compass_variance"))}
+        etats = detecteur.ajouter(v["SV"], v["SP"], v["SM"], etat["fix"])
+        trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"],
+                        f"{detecteur.score:.4f}"] + [int(etats[n]) for n in enligne.NOMS])
+        for nom, actif in etats.items():
+            if actif != alarmes[nom]:
+                texte = "ALARME" if actif else "fin d'alarme"
+                journal(f"DÉTECTEUR {nom} : {texte}")
+                alarmes[nom] = actif
     elif genre == "GPS_RAW_INT":
         if (msg.fix_type, msg.satellites_visible) != (etat["fix"], etat["sats"]):
             etat["fix"], etat["sats"] = msg.fix_type, msg.satellites_visible
@@ -255,6 +294,7 @@ pomper(1)
 journal("rc 3 1500 (renvoyé toutes les 0,5 s)")
 changer_mode(CIRCLE, "circle")
 t_cercle = time.monotonic()
+en_cercle = True
 journal("t = 0 du cercle")
 
 # Cercle nominal, ou cercle avec panne
@@ -283,6 +323,9 @@ else:
     pomper(CERCLE_APRES)
 
 # Atterrissage
+en_cercle = False
+if trace is not None:
+    fichier_trace.flush()
 changer_mode(RTL, "rtl")
 # 900 s : sous 9 m/s, après une coupure GPS, le drone peut revenir de loin à ≈ 1 m/s (log 72)
 if not pomper(900, lambda: not etat["arme"] or (etat["alt"] is not None and etat["alt"] < 0.3)):

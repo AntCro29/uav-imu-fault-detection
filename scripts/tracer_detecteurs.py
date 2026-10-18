@@ -25,27 +25,13 @@ ENCRE, GRILLE, ZONE_PANNE = "#333333", "#e6e6e6", "#f3d6d6"
 
 
 def seuil_adaptatif(x, k=da.K):
-    """Même boucle que da.alarme_canal, en gardant la valeur du seuil à chaque instant."""
-    n = len(x)
-    actif, seuil = np.zeros(n, dtype=bool), np.full(n, np.nan)
-    compte, fige = 0, None
-    for i in range(n):
-        if fige is not None:
-            s = fige
-        elif i >= da.FENETRE + da.RETARD:
-            w = x[i - da.RETARD - da.FENETRE:i - da.RETARD]
-            s = max(da.PLANCHER, w.mean() + k * w.std())
-        else:
-            s = None
-        if s is not None:
-            seuil[i] = s
-        compte = compte + 1 if s is not None and x[i] > s else 0
-        actif[i] = compte >= da.PERSISTANCE
-        if actif[i] and fige is None:
-            fige = s
-        elif not actif[i] and compte == 0:
-            fige = None
-    return seuil, pd.Series(actif)
+    """Alarme du seuil adaptatif et valeur du seuil à chaque instant (NaN tant que la fenêtre se remplit)."""
+    canal = da.SeuilAdaptatif(k)
+    actif, seuil = [], []
+    for v in x:
+        actif.append(canal.ajouter(v))
+        seuil.append(np.nan if canal.seuil is None else canal.seuil)
+    return np.array(seuil), pd.Series(actif)
 
 
 def tracer(df, seuil_fixe, modele, seuil_ml, sortie, titre):
@@ -56,7 +42,6 @@ def tracer(df, seuil_fixe, modele, seuil_ml, sortie, titre):
     sa, al_ad = {}, []
     for k in ds.CANAUX:
         sa[k], a = seuil_adaptatif(c[k].to_numpy())
-        assert a.equals(da.alarme_canal(c[k].to_numpy(), da.K)), "seuil adaptatif non reproduit"
         al_ad.append(a)
     score = ml.scores(modele, c)
     alarmes = {"fixe": pd.concat(al_fixe + [gps], axis=1).any(axis=1),
