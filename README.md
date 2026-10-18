@@ -8,10 +8,11 @@ modèle de machine learning entraîné sur des vols nominaux.
 
 Projet en cours : collecte de vols, analyse des innovations, détecteurs à seuil (seuil fixe,
 puis seuil qui s'adapte au niveau des innovations) et premier détecteur par machine learning
-(Isolation Forest entraîné sur des vols nominaux), comparés sur des vols de test. La
+(Isolation Forest entraîné sur des vols nominaux), comparés puis combinés sur une campagne de
+test de 60 vols neufs, dont quatre types de panne jamais vus pendant les réglages. La
 classification du type de panne et la récupération ne sont pas encore abordées.
 
-Cinquante-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Cent vingt-quatre vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -38,12 +39,21 @@ Cinquante-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 42 à 46 | automatique | Sous vent 3 m/s venant de 0°, turbulence 1 : biais 0,2, 0,3 et 0,5 m/s², décalage magnétomètre, coupure GPS de 60 s |
 | 47 à 50 | automatique | Biais de 0,2 puis 0,3 m/s² sous vent 6 m/s venant de 90° (injection à 135 s) et de 180° (injection à 143 s) |
 | 51 à 58 | automatique | Sous vent 9 m/s venant de 0° (injection à 120 s) puis de 90° (injection à 135 s), turbulence 3 : biais 0,5 et 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
+| 59 à 64 | automatique | Vols pilotes des nouvelles pannes, sans vent, pour choisir les amplitudes : dérive 0,5 m/s², biais gyroscope 0,02 rad/s, bruit gyroscope 5, accéléromètre bloqué, bruit gyroscope 30 et 60 |
+| 65 à 82 | automatique | Campagne de test, nominal : trois vols sans vent, puis trois directions de vent par vitesse (3, 4,5, 6, 7,5 et 9 m/s), directions différentes de celles déjà volées |
+| 83 à 100 | automatique | Campagne de test, pannes déjà connues (trois vols chacune, vents de 0 à 9 m/s, injection à 120, 128, 135 ou 143 s) : biais 0,2, 0,3, 0,5 et 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
+| 101 à 109 | automatique | Campagne de test, dérive d'accéléromètre X des trois IMU (rampe sur 60 s jusqu'à 0,3, 0,5 et 1,0 m/s²), sans vent, 3 et 6 m/s |
+| 110 à 115 | automatique | Campagne de test, biais de gyroscope X des trois IMU (0,01 et 0,02 rad/s), sans vent, 3 et 6 m/s |
+| 116 à 121 | automatique | Campagne de test, bruit de gyroscope des trois IMU (`SIM_GYR*_RND` 30 et 60), sans vent, 3 et 6 m/s |
+| 122 à 124 | automatique | Campagne de test, accéléromètre de l'IMU 1 seule bloqué à 0,01 m/s² sur ses trois axes, sans vent, 3 et 6 m/s |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 58 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 124 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
-uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols 32, 33, 36 et 37, sans vent. Les vols 36
-à 58 n'ont servi à aucun réglage : ils forment le jeu de test du seuil adaptatif.
+uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
+à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
+jeu de validation pour régler ce dernier. Les vols 65 à 124 n'ont servi à aucun réglage : ils
+forment le jeu de test final.
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
 d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
@@ -218,6 +228,61 @@ un tirage plutôt favorable. Avec un seuil égal au maximum vu à l'entraînemen
 mince ; il n'a pas été retouché après avoir vu les vols de test. Un seul vol par configuration
 de test.
 
+### Test final : 60 vols neufs, dont quatre nouveaux types de panne (vols 65 à 124)
+
+**Réglages faits sur le jeu de validation (vols 36 à 58), avant la campagne** : le seuil de
+l'Isolation Forest devient le plus haut score nominal d'entraînement + 0,02 (sur cinq graines, une
+marge de 0,01 suffit à supprimer les fausses alarmes, 0,02 en garde une de plus) ; 200 arbres
+(500 n'apportent rien) ; et une combinaison, alarme si l'Isolation Forest **ou** le seuil
+adaptatif se déclenche, qui ramène le délai moyen d'environ 2,3 s à environ 1,4 s sans ajouter
+de fausse alarme. Les quatre détecteurs ont ensuite été figés, puis évalués **une seule fois**
+sur la campagne de test. Entraînement et calibration : vols 5 à 35, comme avant. La campagne
+comprend 18 vols nominaux, 18 vols avec les pannes déjà connues et 24 vols avec quatre pannes
+nouvelles : dérive lente d'accéléromètre (biais qui croît linéairement de 0 à sa valeur finale
+pendant les 60 s de panne), biais de gyroscope, bruit de gyroscope et accéléromètre bloqué sur
+une seule IMU.
+
+| Panne (vols de test) | Seuil fixe | Seuil adaptatif, k = 6 | Isolation Forest | ML + adaptatif |
+|---|---|---|---|---|
+| Biais 0,2 m/s² (×3) | manqué (×3) | 1,3 à 2,6 s | 3,2 à 4,3 s | 1,3 à 2,6 s |
+| Biais 0,3, 0,5 et 1,0 m/s² (×9) | 1,5 à 3,3 s | 0,7 à 1,7 s | 1,5 à 2,8 s | 0,7 à 1,5 s |
+| Magnétomètre (×3) | 0,5 s | 0,5 s | 2,3 à 2,7 s | 0,5 s |
+| Coupure GPS 60 s (×3) | 0,7 s | 0,7 s | 0,7 s | 0,7 s |
+| Dérive 0,3 m/s² (×3) | 1 / 3 (53,7 s) | manqué (×3) | 21,9 à 30,1 s | 21,9 à 30,1 s |
+| Dérive 0,5 m/s² (×3) | 28,3 à 54,0 s | manqué (×3) | 16,5 à 23,9 s | 16,5 à 23,9 s |
+| Dérive 1,0 m/s² (×3) | 19,1 à 19,4 s | 1 / 3 (13,4 s) | 10,3 à 12,9 s | 10,3 à 12,9 s |
+| Biais gyroscope 0,01 et 0,02 rad/s (×6) | 1,7 à 4,3 s | 0,8 à 1,5 s | 1,9 à 3,1 s | 0,8 à 1,5 s |
+| Bruit gyroscope 30 (×3) | manqué (×3) | manqué (×3) | 2 / 3 (4,5 et 12,3 s) | 2 / 3 |
+| Bruit gyroscope 60 (×3) | 1 / 3 (12,9 s) | 2,3 à 9,1 s | 3,7 à 8,7 s | 2,3 à 8,7 s |
+| Accéléromètre bloqué, IMU 1 (×3) | 0,5 à 0,7 s | 0,5 à 0,7 s | 1,4 à 9,5 s | 0,5 à 0,7 s |
+| **Pannes détectées** | **32 / 42** | **31 / 42** | **41 / 42** | **41 / 42** |
+| **Fausses alarmes (8 217 s de nominal)** | **0** | **0** | **0** | **0** |
+
+**La dérive lente piège le seuil adaptatif**, comme on pouvait le craindre : sa fenêtre de 30 s
+suit la montée de la panne et le seuil reste toujours au-dessus de l'innovation (8 dérives
+manquées sur 9). L'Isolation Forest, dont la référence est le nominal d'entraînement, fixe, les
+détecte toutes. Les délais sur les dérives sont longs par nature : au moment de la détection, le
+biais n'a atteint qu'une fraction de sa valeur finale.
+
+![Vol 104 : ce que voient les quatre détecteurs pendant une dérive](docs/figures/test_derive_vol104.png)
+
+**La combinaison prend le meilleur des deux** sur chaque vol : la réactivité du seuil adaptatif
+sur les pannes franches (magnétomètre en 0,5 s au lieu de 2,3-2,7 s, accéléromètre bloqué en
+0,5-0,7 s au lieu de 1,4-9,5 s, la saturation du score de l'Isolation Forest le ralentissant) et
+la sensibilité de l'Isolation Forest aux pannes lentes, sans aucune fausse alarme ajoutée. Le
+seuil fixe, calibré pour le vent le plus fort, ne voit plus le biais de 0,2 m/s². La seule panne
+manquée par les quatre détecteurs est le bruit de gyroscope le plus faible, sans vent (vol 116) :
+les innovations restent sous 0,03, l'EKF filtre presque tout ce bruit.
+
+Observations sur le déroulé : l'accéléromètre bloqué fait basculer ArduPilot sur son second cœur
+EKF 0,3 s après l'injection (les détecteurs lisent le cœur 0, qui voit une panne très franche) ;
+pendant les coupures GPS, le drone dérive de 390 à 540 m sous le vent avant de revenir ; au vol 94
+(biais de 1,0 m/s² sous 9 m/s), l'altitude descend à 13,8 m juste après le retrait de la panne.
+
+Limites : trois vols par configuration ; 0 fausse alarme sur 60 vols signifie seulement, d'après
+la règle de trois, que le taux réel est probablement inférieur à environ 5 % des vols ;
+simulation sans vibrations des moteurs ; une seule graine pour l'Isolation Forest.
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -247,7 +312,11 @@ ce dépôt, dans `~/drone/ardupilot`.
   (k = 6 par défaut), détail vol par vol avec les mêmes métriques que le seuil fixe.
 - `scripts/comparer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> [k ...]` :
   seuil fixe calibré et Isolation Forest entraîné sur les logs jusqu'à
-  `dernier_log_calibration`, seuil adaptatif ; tous évalués sur les logs suivants (vols jamais vus).
+  `dernier_log_calibration`, seuil adaptatif et combinaison « ML + adaptatif » ; tous évalués sur
+  les logs suivants (vols jamais vus).
+- `scripts/tracer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> <log> <image.png> [titre]` :
+  un vol avec ce que voient les quatre détecteurs (innovations et seuils, score de l'Isolation
+  Forest, alarmes). Résultat sur le vol 104 : `docs/figures/test_derive_vol104.png`.
 - `scripts/detecteur_ml.py <dossier_jeu_donnees> <dernier_log_apprentissage>` : Isolation
   Forest entraîné sur le nominal des logs jusqu'à `dernier_log_apprentissage`, détail vol par vol
   sur les logs suivants (délai, part de la panne en alarme, fausses alarmes, état dégradé).
@@ -375,10 +444,9 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Répéter les vols de test pour mesurer la variabilité du seuil adaptatif (un seul vol par
-  configuration pour l'instant), et traiter le cas des pannes lentes « absorbées » par le seuil.
+- Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
+  saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.
+- Pannes sur un seul capteur (comparaison entre capteurs redondants) ; ajout de vibrations des
+  moteurs dans la simulation, pour un nominal plus réaliste.
 - Traitement de la phase qui suit le retrait d'une panne.
-- Pannes sur un seul capteur (comparaison entre capteurs redondants), dérive, bruit, capteur bloqué.
-- Détecteur ML : nouvelle campagne de vols de test (le seuil du score n'a pas pu être réglé sans
-  biaiser le test actuel), combinaison avec le seuil adaptatif, autoencodeur.
 - Classification du type de panne, puis stratégies de récupération.

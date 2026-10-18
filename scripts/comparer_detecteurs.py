@@ -8,6 +8,8 @@ adaptatif n'utilise pas de calibration (k = 6 par défaut, plusieurs valeurs pos
 colonne : alarme si l'Isolation Forest OU le seuil adaptatif (k = 6) se déclenche.
 Exemple (2026-10-17) : calibration sur les logs 19 à 49, test sur les logs 50 à 72 :
     python scripts/comparer_detecteurs.py data/jeu_donnees 49 4 6
+Test final (2026-10-18) : dossier contenant les logs 19 à 49 et la campagne 79 à 138 :
+    python scripts/comparer_detecteurs.py data/jeu_test 49
 """
 import os
 import sys
