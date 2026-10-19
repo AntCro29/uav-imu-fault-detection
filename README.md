@@ -341,8 +341,15 @@ première partie vérifie les moyens que donne ArduPilot pour naviguer sans GPS,
   que le modèle de traînée est désactivé (par défaut). Sans GPS, il suppose une vitesse nulle, et
   au bout de 15 s il cesse de naviguer (« stopped aiding ») : le drone dérive sans le savoir.
 - **Le levier** : les coefficients de traînée (`EK3_DRAG_BCOEF_X/Y` 9,5, `EK3_DRAG_MCOEF` 0,082,
-  valeurs du test `DeadReckoningInWind` d'ArduPilot pour ce simulateur) font estimer le vent,
-  et la traînée compte alors comme une mesure : l'EKF continue de naviguer à l'estime.
+  valeurs du test `DeadReckoningInWind` d'ArduPilot pour ce simulateur) font estimer le vent
+  tant que le GPS est là, et la traînée compte alors comme une mesure : sans GPS, l'EKF ne
+  passe pas en « stopped aiding » et continue de naviguer à l'estime.
+- **Ce que la traînée ne fait pas** (vérifié après coup dans le code) : pendant la navigation à
+  l'estime, l'EKF tient son estimation du vent pour exacte (variance mise à zéro,
+  `AP_NavEKF3_core.cpp:1112-1117`), et la fusion de la traînée ne corrige que les états de vent
+  (`AP_NavEKF3_AirDataFusion.cpp:505-508`). Elle ne corrige donc plus ni la vitesse ni la
+  position : la navigation à l'estime est une intégration inertielle pure (au vol 130, le vent
+  estimé reste figé au centième près pendant toute la coupure).
 - **Ignorer le GPS volontairement** : ArduPilot a trois jeux de sources de navigation, et la
   commande MAVLink `MAV_CMD_SET_EKF_SOURCE_SET` fait passer de l'un à l'autre en vol. Un jeu
   sans GPS permettrait d'écarter un GPS leurré, qui se dit sain.
@@ -361,7 +368,12 @@ Erreur de navigation réelle (position du simulateur contre position estimée pa
 ![Vol 23 : coupure GPS sans estimation du vent](docs/figures/coupure_gps_sans_trainee_vol23.png)
 ![Vol 130 : même coupure, vent estimé par la traînée](docs/figures/coupure_gps_avec_trainee_vol130.png)
 
-Avec la traînée, le drone reste sur son cercle pendant toute la coupure. Le détecteur ne fait
+Avec la traînée, le drone reste sur son cercle pendant toute la coupure. Ce résultat est à lire
+avec prudence : la traînée évite le passage en « stopped aiding », mais la précision pendant la
+coupure vient de l'IMU simulée, sans bruit ni vibration dans nos vols. Sur un vrai drone,
+l'intégration inertielle pure dériverait beaucoup plus vite (non mesuré ici). Elle varie aussi
+d'un vol à l'autre : sur la campagne suivante (R3 v2, pas encore décrite ici), sous un vent venant
+de l'est, l'erreur a atteint 50 m après 60 s sans GPS. Le détecteur ne fait
 aucune fausse alarme sur le vol nominal avec traînée (innovations maximales identiques à celles
 du vol 16). Limites : un vol par cas, un seul vent, constant pendant la coupure (le test
 d'ArduPilot signale qu'un vent qui change pendant la navigation à l'estime est le cas
