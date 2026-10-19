@@ -23,7 +23,6 @@ import erreur_navigation as en
 LOGS = os.path.join(os.environ.get("ARDUPILOT", os.path.expanduser("~/drone/ardupilot")), "logs")
 
 VRAIE, ESTIMEE, PANNE, GRILLE = "#333333", "#2a78d6", "#f3d6d6", "#e6e6e6"
-T_MAX = 270      # fin prévue de la mission (retrait + 90 s)
 MODE_COUL = {9: ("LAND", "#d6452a"), 6: ("RTL", "#eda100")}
 
 
@@ -43,7 +42,7 @@ def cadre(v, marge=0.15):
     return a - d, b + d
 
 
-def ligne(ax, df, centre, t_pert, bascules, modes, etiquette):
+def ligne(ax, df, centre, t_pert, bascules, modes, etiquette, t_max):
     t = df.tc
     for a in ax[1:]:
         if t_pert:
@@ -78,7 +77,7 @@ def ligne(ax, df, centre, t_pert, bascules, modes, etiquette):
     ax[3].set_yscale("symlog", linthresh=50)
     ax[3].set_ylim(bottom=0)
     for a in ax[1:]:
-        a.set_xlim(0, T_MAX)
+        a.set_xlim(0, t_max)
     ax[3].set_ylabel("m (échelle log au-delà de 50)", fontsize=8)
     for a in ax:
         a.grid(True, color=GRILLE, lw=0.6)
@@ -93,8 +92,11 @@ if __name__ == "__main__":
     fig, axes = plt.subplots(len(vols), 4, figsize=(17, 3.4 * len(vols)),
                              gridspec_kw={"width_ratios": [1, 1.3, 1.3, 1.3]})
     axes = np.atleast_2d(axes)
-    for ax, (n, etiquette) in zip(axes, vols):
-        ligne(ax, *charger(int(n)), etiquette)
+    donnees = [charger(int(n)) for n, _ in vols]
+    # fin de l'axe du temps : fin prévue de la mission (retrait + 90 s), la plus tardive des vols
+    t_max = max(d[2][1] + 90 if d[2] else d[0].tc.iloc[-1] for d in donnees)
+    for ax, d, (_, etiquette) in zip(axes, donnees, vols):
+        ligne(ax, *d, etiquette, t_max)
     for a, t in zip(axes[0], ["trajectoire vue de dessus", "position nord en fonction du temps",
                               "position est en fonction du temps", "erreur de navigation et distance au centre"]):
         a.set_title(t, fontsize=9)

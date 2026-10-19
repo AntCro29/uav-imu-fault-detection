@@ -13,10 +13,12 @@ test de 60 vols neufs, dont quatre types de panne jamais vus pendant les réglag
 détecteurs tournent aussi en vol, sur le flux MAVLink, avec les mêmes alarmes que l'analyse des
 logs. Récupération : une première réponse aux pannes GPS (écarter le GPS, continuer la mission de
 surveillance à l'estime, revenir au GPS) bat les réactions par défaut d'ArduPilot sur le brouillage
-et sur un leurre en échelon, mais pas encore sur un leurre lent. La classification du type de panne
+et sur un leurre en échelon, mais pas encore sur un leurre lent. Sa deuxième version, validée sur
+30 vols neufs, échoue à revenir au GPS dès que la navigation à l'estime a trop dérivé (7 vols
+sur 15) : critère de retour à revoir. La classification du type de panne
 n'est pas encore abordée.
 
-Cent quarante-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Cent soixante-dix-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -54,9 +56,10 @@ Cent quarante-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle)
 | 129 à 131 | automatique | Navigation sans GPS, vent 6 m/s venant de 0°, turbulence 2, vent estimé par la traînée : nominal ; coupure GPS de 60 s ; abandon volontaire du GPS par l'EKF pendant 60 s |
 | 132 | automatique | Mise au point de la réponse R3 : leurre GPS de 100 m en échelon, vent 6 m/s venant de 0°, turbulence 2 |
 | 133 à 149 | automatique | Récupération, même vent : brouillage GPS, leurre de 100 m en échelon, leurre en rampe jusqu'à 100 m, biais d'accéléromètre de 0,5 m/s² (vol témoin), chacun avec quatre réponses (rien, ArduPilot par défaut, ArduPilot avec traînée, R3) ; nominal avec R3 |
+| 150 à 179 | automatique | Validation de R3 v2, vent 6 m/s venant de 90°, 180° ou 270°, turbulence 2 : leurres de 100 m en échelon et en rampe, leurre en rampe jusqu'à 30 m, brouillage, chacun sans réponse et avec R3 v2 ; vols témoins avec R3 v2 (biais 0,5 m/s² sous les trois vents, biais 0,3, dérive 0,5) ; trois nominaux avec R3 v2 |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 149 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 179 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -446,6 +449,61 @@ adaptatif de SP, calculé sur les 30 dernières secondes, reste très haut et ce
 environ 30 s ; l'exclusion à tort après le brouillage vient d'une alarme due au recalage de
 l'EKF, commencée pendant le délai de 10 s et encore active à sa fin.
 
+### Récupération, R3 v2 : validation sur 30 vols neufs (vols 150 à 179)
+
+**Changements par rapport à la v1**, décidés après la partie B : retour au GPS seulement après
+**30 s** de cohérence (au lieu de 5 s ; 25 m en 30 s, soit un leurre plus lent qu'environ
+0,8 m/s, reste invisible) ; pendant l'exclusion, le détecteur n'est plus alimenté, et
+l'épisode d'alarme qui a déclenché l'exclusion est retiré de sa mémoire, pour qu'au retour son
+seuil adaptatif reparte du nominal d'avant la panne (sans exclusion, alarmes inchangées sur les
+60 vols de test rejoués) ; seul un épisode d'alarme commencé plus de 10 s après un retour peut écarter de
+nouveau le GPS.
+
+**Plan** : vent 6 m/s venant de 90°, 180° ou 270° (turbulence 2), injection à 128, 135 ou
+143 s de cercle selon le vol, panne de 60 s ; chaque panne avec R0 (rien) et R3 v2, un vol par
+vent. Leurre de 100 m en échelon et en rampe, leurre en rampe jusqu'à 30 m (0,5 m/s, sous la
+limite de 0,8 m/s, pour mesurer cette limite), brouillage ; cinq vols témoins avec R3 v2
+(biais d'accéléromètre 0,5 m/s² sous les trois vents, biais 0,3, dérive 0,5) et trois nominaux.
+
+| Panne | R0 rien | R3 v2 |
+|---|---|---|
+| Leurre en échelon (vols 150 à 155) | erreur 100 m, 30 à 41 % dans la zone pendant la panne | vent 180° : **16 m pendant la panne, 24 m après, 100 %**, retour au GPS ; vents 90° et 270° : 50 m et 10 m pendant la panne, puis **échec** (244 m et 58 m) |
+| Leurre en rampe jusqu'à 100 m (156 à 161) | 98 m, 57 à 69 % | vent 270° : **26 m pendant, 42 m après, 100 %**, retour au GPS ; vents 90° et 180° : **échec** (196 m et 82 m après la panne) |
+| Leurre en rampe jusqu'à 30 m (162 à 165) | 29,5 m, 94 à 100 % | 29,5 m : retour au GPS leurré pendant la panne, **aucun gain** (limite attendue) |
+| Brouillage (166 à 171) | **1 500 à 2 300 m**, 0 % dans la zone après la panne | **9 à 28 m pendant la panne, 100 %** ; puis **échec** dans les trois cas (26 à 114 m après) |
+| Témoins (172 à 176) et nominaux (177 à 179) | | **GPS jamais écarté**, erreur ≤ 0,6 m |
+
+![R3 v2 contre rien : leurre en échelon](docs/figures/r3v2_leurre_echelon.png)
+![R3 v2 contre rien : brouillage](docs/figures/r3v2_brouillage.png)
+
+**Sept échecs sur quinze vols R3, tous de la même façon** (vérifié dans les messages de chaque
+log) :
+
+1. R3 écarte le GPS ; environ 10 s plus tard l'EKF déclare la navigation à l'estime
+   (« Dead Reckoning started »).
+2. Pendant l'exclusion, la navigation est une intégration inertielle pure (voir la partie A) :
+   l'erreur de vitesse n'est corrigée par rien. Au vol 151, l'écart entre vitesse estimée et
+   vitesse vraie passe de 0,4 m/s à 5,3 m/s, sur l'axe du vent ; au vol 153, il reste entre 0,4
+   et 0,8 m/s. Cause de cette différence non établie.
+3. 30 s après le début de la navigation à l'estime, Copter cesse d'accepter la position estimée
+   (`FS_DR_TIMEOUT` 30 s, « Dead Reckoning timeout » puis « EKF variance: position lost »). Ce
+   délai ne change pas le calcul de l'EKF (`ArduCopter/events.cpp:350-357`), mais il rend
+   impossibles les modes qui demandent une position.
+4. Panne de 60 s plus 30 s de cohérence : une exclusion dure au moins 90 s. Quand l'erreur à
+   l'estime dépasse 25 m, le GPS redevenu sain ne passe plus le critère de retour (écart de
+   position < 25 m) ; au bout de 2 minutes, le RTL de dernier recours est **refusé** par ArduPilot
+   (« requires position »), et `vol_auto.py` s'arrête. Les mesures « après la panne » de ces vols
+   s'arrêtent donc à ce moment (249 à 264 s de cercle).
+
+Les deux réussites sur les leurres de 100 m viennent de vols où l'erreur à l'estime est restée
+sous 25 m. La v1 avait réussi le brouillage parce qu'elle revenait au GPS au bout de 5 s, avant
+que l'erreur ne grandisse. Le gain sur la panne elle-même reste net (brouillage : 9 à 28 m contre
+1,5 à 2,3 km ; aucune exclusion à tort sur les 8 vols témoins et nominaux), mais le critère de
+retour au GPS et le dernier recours sont à revoir.
+
+Limites : un vol par case ; vent de 6 m/s seulement ; IMU simulée sans bruit, donc navigation à
+l'estime plus précise que sur un vrai drone.
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -647,9 +705,12 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Récupération, R3 v2 : observer le GPS plus longtemps avant d'y revenir (leurre lent) et
-  allonger le délai après un retour ; validation sur des vols neufs (autres vents et caps,
-  plusieurs vols témoins, leurre plus lent pour mesurer la limite).
+- Récupération, R3 v3 : un critère de retour au GPS qui tolère une dérive à l'estime croissante
+  (déplacements cohérents et écart de position sous une tolérance qui grandit avec la durée sans
+  GPS), `FS_DR_TIMEOUT` allongé pour que le dernier recours reste possible, atterrissage si le
+  retour au départ est refusé ; validation sur des vols neufs.
+- Ajouter du bruit d'IMU à la simulation : la navigation à l'estime est aujourd'hui une
+  intégration inertielle presque parfaite, et les détecteurs ont été réglés sans bruit.
 - Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.
 - Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
   saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.

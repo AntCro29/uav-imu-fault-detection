@@ -222,10 +222,15 @@ def traiter(msg):
     elif genre == "EKF_STATUS_REPORT" and detecteur is not None and en_cercle:
         v = {c: enligne.quantifier(getattr(msg, champ)) for c, champ in
              (("SV", "velocity_variance"), ("SP", "pos_horiz_variance"), ("SM", "compass_variance"))}
+        if recup is not None and recup.etat != "normal":
+            # GPS écarté : innovations figées par l'EKF, le détecteur n'est pas alimenté (R3 v2)
+            trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"], ""]
+                           + [""] * len(enligne.NOMS) + [recup.etat])
+            return
         etats = detecteur.ajouter(v["SV"], v["SP"], v["SM"], etat["fix"])
         if recup is not None:
-            action = action or recup.detecteur(time.monotonic(), detecteur.canaux, detecteur.alarme_gps,
-                                               etat["fix"])
+            action = action or recup.detecteur(time.monotonic(), detecteur.n - 1, detecteur.canaux,
+                                               detecteur.alarme_gps, etat["fix"])
         trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"],
                         f"{detecteur.score:.4f}"] + [int(etats[n]) for n in enligne.NOMS]
                        + [recup.etat if recup is not None else ""])
@@ -313,7 +318,10 @@ def executer():
     global action, execution
     decision, action, execution = action, None, True
     if decision == "ecarter":
-        journal(f"R3 : GPS écarté ({recup.cause})")
+        journal(f"R3 : GPS écarté ({recup.cause}) ; détecteur suspendu, "
+                f"{detecteur.n - recup.indice_episode} échantillon(s) de l'épisode retirés")
+        detecteur.suspendre(recup.indice_episode)
+        alarmes.update({nom: False for nom in alarmes})
         basculer(2)
     elif decision == "revenir":
         journal(f"R3 : retour au GPS (écart {recup.ecart:.1f} m < {recuperation.ECART_RETOUR_M:g} m "

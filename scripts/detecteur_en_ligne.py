@@ -59,10 +59,12 @@ class DetecteurEnLigne:
         self.score = np.nan
         self.canaux = {c: False for c in ds.CANAUX}   # alarme du seuil adaptatif, canal par canal
         self.alarme_gps = False
+        self.n = 0              # échantillons reçus (après suspendre : échantillons conservés)
 
     def ajouter(self, sv, sp, sm, gps_fix):
         """Un échantillon (10 Hz) ; renvoie l'état d'alarme des quatre détecteurs."""
         x = {"SV": sv, "SP": sp, "SM": sm}
+        self.n += 1
         self.recent.append(x)
         gps = self.alarme_gps = self.gps.ajouter((gps_fix or 0) < ds.FIX_3D)
         # liste et dictionnaire, pas de générateur : any() s'arrêterait au premier canal en
@@ -78,6 +80,23 @@ class DetecteurEnLigne:
         iso = self.ml.ajouter(self.score > self.seuil_ml)
         return {"fixe": fixe or gps, "adaptatif": adaptatif or gps,
                 "isolation forest": iso or gps, "ML + adaptatif": iso or adaptatif or gps}
+
+
+    def suspendre(self, depuis):
+        """Oublie les échantillons reçus à partir du numéro `depuis` (0 = le premier) et remet les
+        alarmes à zéro. Sert à R3 quand le GPS est écarté : les innovations de la panne, puis les
+        valeurs figées par l'EKF, ne doivent pas entrer dans le seuil adaptatif ni dans les
+        variables de l'Isolation Forest après le retour au GPS."""
+        retires = self.n - depuis
+        for canal in self.adaptatif.values():
+            del canal.passe[depuis:]
+            canal.compte, canal.fige, canal.seuil = 0, None, None
+        for _ in range(min(retires, len(self.recent))):
+            self.recent.pop()
+        for p in list(self.fixe.values()) + [self.ml, self.gps]:
+            p.compte = 0
+        self.canaux = {c: False for c in ds.CANAUX}
+        self.alarme_gps, self.score, self.n = False, np.nan, depuis
 
 
 def charger(fichier):
