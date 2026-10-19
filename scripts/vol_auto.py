@@ -1,10 +1,12 @@
 """Vol SITL automatique selon la procédure du projet, piloté en pymavlink au lieu de MAVProxy.
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
-                           [--injection T] [--amplitude A] [--detecteur]
+                           [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
-Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, et (amplitude obligatoire)
-derive, gyro, bruit_gyro, bloque.
+Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
+derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
+jam : brouillage GPS simulé pendant 60 s (SIM_GPS1_JAM = 1 : perte de signal, puis fix, nombre
+de satellites, vitesse et position erratiques, SIM_GPS.cpp:288-347).
 Vent optionnel : vitesse (m/s), direction d'où il vient (degrés vrais), turbulence (m/s).
 --injection : instant d'injection en s après l'entrée en CIRCLE (120 par défaut). Le cercle
 est très régulier (un tour ≈ 30,8 s) : changer l'instant change le cap à l'injection.
@@ -18,7 +20,10 @@ est très régulier (un tour ≈ 30,8 s) : changer l'instant change le cap à l'
   bloque : accéléromètre de l'IMU 1 seule forcé à cette valeur sur ses trois axes, m/s²
            (SIM_ACCEL1_FAIL ; 0 désactive) ;
   magneto : décalage ajouté à la valeur de départ de SIM_MAG*_OFS_X (défaut +150) ;
-  sans objet pour les coupures GPS.
+  leurre : décalage vers le nord de la position GPS, en m (SIM_GPS1_GLTCH_X, en degrés de
+           latitude dans le simulateur ; fix et vitesse GPS inchangés, SIM_GPS.cpp:574-583) ;
+  leurre_rampe : même décalage en rampe, valeur finale atteinte à la fin des 60 s ;
+  sans objet pour les coupures et le brouillage GPS.
 Réglé avant le décollage avec SIM_WIND_T = 1 (vent uniforme en altitude : le drone à 15 m
 subit le vent réglé ; par défaut le simulateur le réduirait de √(altitude / 60)).
 --detecteur : fait tourner pendant le cercle les quatre détecteurs (detecteur_en_ligne.py), à
@@ -26,6 +31,13 @@ partir de data/detecteur_en_ligne.joblib (créé par `detecteur_en_ligne.py prep
 innovations arrivent par EKF_STATUS_REPORT, demandé à 10 Hz, tronquées au centième comme XKF4.
 Chaque échantillon est écrit dans data/en_ligne_<date>.csv, chaque début et fin d'alarme dans le
 journal. Aucune action sur le drone : le vol se déroule comme sans l'option.
+--trainee : avant le décollage, active l'estimation du vent par la traînée (EK3_DRAG_BCOEF_X/Y
+9,5, EK3_DRAG_MCOEF 0,082, valeurs du test DeadReckoningInWind d'ArduPilot pour ce simulateur)
+et désactive le failsafe de navigation à l'estime (FS_DR_ENABLE 0, sinon RTL dès que l'EKF
+navigue sans GPS), pour observer l'EKF sans changement de mode.
+--bascule T (vol nominal) : à T s de cercle, passe l'EKF sur le jeu de sources 2 (position et
+vitesse horizontales : aucune, hauteur : baromètre, cap : compas), réglé avant le décollage, par
+MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -46,6 +58,8 @@ from pymavlink import mavutil
 DEPOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FICHIER_DETECTEUR = os.path.join(DEPOT, "data", "detecteur_en_ligne.joblib")
 
+# 1° de latitude en m : LATLON_TO_M d'ArduPilot (AP_Math/definitions.h:52, m pour 1e-7 degré)
+M_PAR_DEGRE = 0.011131884502145034 * 1e7
 IMU = ["SIM_ACC1_BIAS_X", "SIM_ACC2_BIAS_X", "SIM_ACC3_BIAS_X"]
 SCENARIOS = {
     "nominal": None,
@@ -62,7 +76,16 @@ SCENARIOS = {
     "bruit_gyro": {"params": ["SIM_GYR1_RND", "SIM_GYR2_RND", "SIM_GYR3_RND"],
                    "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60},
     "bloque": {"params": ["SIM_ACCEL1_FAIL"], "attendu": 0.0, "injection": None, "retrait": 0.0, "duree": 60},
+    "jam": {"params": ["SIM_GPS1_JAM"], "attendu": 0.0, "injection": 1.0, "retrait": 0.0, "duree": 60},
+    "leurre": {"params": ["SIM_GPS1_GLTCH_X"], "attendu": 0.0, "injection": None, "retrait": 0.0,
+               "duree": 60, "echelle": 1 / M_PAR_DEGRE},
+    "leurre_rampe": {"params": ["SIM_GPS1_GLTCH_X"], "attendu": 0.0, "injection": None, "retrait": 0.0,
+                     "duree": 60, "echelle": 1 / M_PAR_DEGRE, "rampe": True},
 }
+TRAINEE = {"EK3_DRAG_BCOEF_X": 9.5, "EK3_DRAG_BCOEF_Y": 9.5, "EK3_DRAG_MCOEF": 0.082}
+SOURCES_SANS_GPS = {"EK3_SRC2_POSXY": 0, "EK3_SRC2_VELXY": 0, "EK3_SRC2_POSZ": 1, "EK3_SRC2_VELZ": 0,
+                    "EK3_SRC2_YAW": 1}
+DUREE_BASCULE = 60
 CERCLE_NOMINAL = 180
 CERCLE_APRES = 90
 ALT_DECOLLAGE = 15.0
@@ -75,6 +98,8 @@ arguments.add_argument("vent", nargs="*", type=float, help="vitesse (m/s) direct
 arguments.add_argument("--injection", type=float, default=120.0, help="instant d'injection après l'entrée en CIRCLE (s)")
 arguments.add_argument("--amplitude", type=float, help="biais (m/s²) ou décalage magnétomètre à injecter")
 arguments.add_argument("--detecteur", action="store_true", help="fait tourner les détecteurs pendant le cercle")
+arguments.add_argument("--trainee", action="store_true", help="estimation du vent par la traînée (EK3_DRAG_*)")
+arguments.add_argument("--bascule", type=float, help="instant (s de cercle) de la bascule sur le jeu de sources sans GPS")
 args = arguments.parse_args()
 if len(args.vent) not in (0, 3):
     arguments.error("le vent demande trois valeurs : vitesse direction turbulence")
@@ -85,17 +110,20 @@ panne = SCENARIOS[args.scenario]
 if panne is not None:
     panne = dict(panne)
     if args.amplitude is not None:
-        if panne["params"] == ["SIM_GPS1_ENABLE"]:
-            arguments.error("--amplitude est sans objet pour une coupure GPS")
-        # biais : valeur injectée = amplitude ; magnétomètre : décalage ajouté à la valeur de départ
-        panne["injection"] = panne["attendu"] + args.amplitude
+        if panne["params"] in (["SIM_GPS1_ENABLE"], ["SIM_GPS1_JAM"]):
+            arguments.error("--amplitude est sans objet pour une coupure ou un brouillage GPS")
+        # biais : valeur injectée = amplitude ; magnétomètre : décalage ajouté à la valeur de départ ;
+        # leurre : mètres convertis en degrés
+        panne["injection"] = panne["attendu"] + args.amplitude * panne.get("echelle", 1)
     elif panne["injection"] is None:
         arguments.error(f"le scénario {args.scenario} demande --amplitude")
 elif args.amplitude is not None or args.injection != 120.0:
     arguments.error("--injection et --amplitude sont sans objet pour un vol nominal")
+if args.bascule is not None and (panne is not None or args.bascule + DUREE_BASCULE > CERCLE_NOMINAL):
+    arguments.error(f"--bascule : vol nominal seulement, et T + {DUREE_BASCULE} s ≤ {CERCLE_NOMINAL} s")
 
 etat = {"alt": None, "arme": False, "mode": None, "crash": False, "fix": None, "sats": None,
-        "ekf_gps": set(), "ack_takeoff": None}
+        "ekf_gps": set(), "ack_takeoff": None, "ack_source": None}
 params = {}
 t_debut = time.monotonic()
 t_cercle = None
@@ -164,6 +192,8 @@ def traiter(msg):
             etat["ekf_gps"].add(msg.text.split()[1])
     elif genre == "COMMAND_ACK" and msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
         etat["ack_takeoff"] = msg.result
+    elif genre == "COMMAND_ACK" and msg.command == mavutil.mavlink.MAV_CMD_SET_EKF_SOURCE_SET:
+        etat["ack_source"] = msg.result
     elif genre == "EKF_STATUS_REPORT" and detecteur is not None and en_cercle:
         v = {c: enligne.quantifier(getattr(msg, champ)) for c, champ in
              (("SV", "velocity_variance"), ("SP", "pos_horiz_variance"), ("SM", "compass_variance"))}
@@ -218,7 +248,9 @@ def regler(valeurs):
         params.pop(nom, None)
     for nom, valeur in valeurs.items():
         m.mav.param_set_send(1, 1, nom.encode(), float(valeur), mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
-    ok = pomper(5, lambda: all(nom in params and abs(params[nom] - v) < 1e-3 for nom, v in valeurs.items()))
+    # tolérance relative : un leurre de quelques 1e-4 degré passerait une tolérance absolue de 1e-3
+    ok = pomper(5, lambda: all(nom in params and abs(params[nom] - v) <= 1e-6 + 1e-5 * abs(v)
+                               for nom, v in valeurs.items()))
     if not ok:
         sys.exit(f"Réglage non confirmé : {valeurs} -> {params}")
     journal("param set " + ", ".join(f"{n} {v}" for n, v in valeurs.items()) + " (confirmé)")
@@ -229,6 +261,16 @@ def changer_mode(numero, nom):
     if not pomper(5, lambda: etat["mode"] == numero):
         sys.exit(f"Mode {nom} refusé")
     journal(f"mode {nom}")
+
+
+def basculer(jeu):
+    etat["ack_source"] = None
+    m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_SET_EKF_SOURCE_SET, 0, jeu, 0, 0, 0, 0, 0, 0)
+    if not pomper(3, lambda: etat["ack_source"] is not None):
+        sys.exit(f"Pas d'accusé de réception pour le jeu de sources {jeu}")
+    if etat["ack_source"] != mavutil.mavlink.MAV_RESULT_ACCEPTED:
+        sys.exit(f"Jeu de sources {jeu} refusé (résultat {etat['ack_source']})")
+    journal(f"Jeu de sources EKF {jeu} (accepté)")
 
 
 def retirer():
@@ -258,6 +300,11 @@ if vent is not None:
 
 # Paramètres
 regler({"FS_EKF_ACTION": 0})
+if args.trainee:
+    regler(TRAINEE)
+    regler({"FS_DR_ENABLE": 0})
+if args.bascule is not None:
+    regler(SOURCES_SANS_GPS)
 regler({"CIRCLE_RADIUS_M": 30})
 regler({"CIRCLE_RATE": 15})
 changer_mode(GUIDED, "guided")
@@ -298,7 +345,13 @@ en_cercle = True
 journal("t = 0 du cercle")
 
 # Cercle nominal, ou cercle avec panne
-if panne is None:
+if panne is None and args.bascule is not None:
+    pomper(args.bascule)
+    basculer(2)
+    pomper(DUREE_BASCULE)
+    basculer(1)
+    pomper(CERCLE_NOMINAL - args.bascule - DUREE_BASCULE)
+elif panne is None:
     pomper(CERCLE_NOMINAL)
 else:
     pomper(CERCLE_AVANT)

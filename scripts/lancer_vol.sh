@@ -1,8 +1,9 @@
 #!/bin/bash
 # Lance un vol SITL automatique : démarre le SITL, exécute vol_auto.py, arrête le SITL.
 # Usage : scripts/lancer_vol.sh <scénario> [vitesse direction turbulence] [--injection T] [--amplitude A]
-# Scénarios : nominal, gps60, gps30, biais10, biais05, magneto, et avec --amplitude : biais,
-# derive, gyro, bruit_gyro, bloque.
+#         [--detecteur] [--trainee] [--bascule T]
+# Scénarios : nominal, gps60, gps30, biais10, biais05, magneto, jam, et avec --amplitude : biais,
+# derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
 # Vent optionnel : vitesse (m/s), direction d'où il vient (degrés), turbulence (m/s).
 # Toutes les options sont transmises à vol_auto.py (voir son en-tête).
 # Le log .BIN est écrit dans ~/drone/ardupilot/logs/ ; le journal du vol dans data/.

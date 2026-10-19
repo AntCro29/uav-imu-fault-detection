@@ -11,9 +11,11 @@ puis seuil qui s'adapte au niveau des innovations) et premier détecteur par mac
 (Isolation Forest entraîné sur des vols nominaux), comparés puis combinés sur une campagne de
 test de 60 vols neufs, dont quatre types de panne jamais vus pendant les réglages. Les quatre
 détecteurs tournent aussi en vol, sur le flux MAVLink, avec les mêmes alarmes que l'analyse des
-logs. La classification du type de panne et la récupération ne sont pas encore abordées.
+logs. La récupération est commencée par la navigation sans GPS : estimer le vent permet au drone de
+continuer sa mission de surveillance pendant une coupure GPS. La classification du type de panne
+n'est pas encore abordée.
 
-Cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Cent trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -48,9 +50,10 @@ Cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 116 à 121 | automatique | Campagne de test, bruit de gyroscope des trois IMU (`SIM_GYR*_RND` 30 et 60), sans vent, 3 et 6 m/s |
 | 122 à 124 | automatique | Campagne de test, accéléromètre de l'IMU 1 seule bloqué à 0,01 m/s² sur ses trois axes, sans vent, 3 et 6 m/s |
 | 125 à 128 | automatique | Détecteur en vol : nominal sous vent 6 m/s venant de 30°, turbulence 2 ; biais 0,3 m/s² sans vent ; décalage magnétomètre sous vent 6 m/s venant de 240°, turbulence 2 ; dérive 0,5 m/s² sans vent |
+| 129 à 131 | automatique | Navigation sans GPS, vent 6 m/s venant de 0°, turbulence 2, vent estimé par la traînée : nominal ; coupure GPS de 60 s ; abandon volontaire du GPS par l'EKF pendant 60 s |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 128 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 131 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -322,6 +325,47 @@ sur les quatre vols. Limites : un vol par panne ; le détecteur tourne sur l'ord
 la simulation, comme sur une station sol, et la simulation tourne sur la même machine (ni vraie
 radio, ni pertes de messages).
 
+### Récupération, partie A : naviguer sans GPS (vols 129 à 131)
+
+Atterrir dès qu'une panne est détectée, c'est ce que fait déjà ArduPilot par défaut, et c'est
+abandonner la mission, ce qui n'a pas de sens dans un environnement où le GPS est brouillé. La
+récupération visée est donc un **mode dégradé** : écarter le capteur fautif et continuer la
+mission (ici, le cercle de surveillance), l'atterrissage restant le dernier recours. Cette
+première partie vérifie les moyens que donne ArduPilot pour naviguer sans GPS, lus dans son code
+(commit `14c871f`) puis testés en vol :
+
+- **Pourquoi le drone dérive sans GPS** : l'EKF n'estime pas le vent sur un multicoptère tant
+  que le modèle de traînée est désactivé (par défaut). Sans GPS, il suppose une vitesse nulle, et
+  au bout de 15 s il cesse de naviguer (« stopped aiding ») : le drone dérive sans le savoir.
+- **Le levier** : les coefficients de traînée (`EK3_DRAG_BCOEF_X/Y` 9,5, `EK3_DRAG_MCOEF` 0,082,
+  valeurs du test `DeadReckoningInWind` d'ArduPilot pour ce simulateur) font estimer le vent,
+  et la traînée compte alors comme une mesure : l'EKF continue de naviguer à l'estime.
+- **Ignorer le GPS volontairement** : ArduPilot a trois jeux de sources de navigation, et la
+  commande MAVLink `MAV_CMD_SET_EKF_SOURCE_SET` fait passer de l'un à l'autre en vol. Un jeu
+  sans GPS permettrait d'écarter un GPS leurré, qui se dit sain.
+
+Erreur de navigation réelle (position du simulateur contre position estimée par l'EKF, cœur 0,
+`scripts/erreur_navigation.py`), sous un vent de 6 m/s venant du nord :
+
+| Vol | Situation | Vent estimé | Erreur de navigation max | Temps dans la zone surveillée (< 60 m du centre) |
+|---|---|---|---|---|
+| 16 | nominal, sans traînée | non estimé | 0,3 m | 100 % |
+| 129 | nominal, avec traînée | 5,84 m/s venant de 359° | 0,3 m | 100 % |
+| 23 | coupure GPS de 60 s, sans traînée | non estimé | **232 m** | **40 %** de la coupure (jusqu'à 266 m du centre) |
+| 130 | coupure GPS de 60 s, avec traînée | 5,85 m/s venant de 359° | **7,6 m** | **100 %** |
+| 131 | GPS écarté par l'EKF pendant 60 s, avec traînée | 5,86 m/s venant de 359° | 17 m | 100 % |
+
+![Vol 23 : coupure GPS sans estimation du vent](docs/figures/coupure_gps_sans_trainee_vol23.png)
+![Vol 130 : même coupure, vent estimé par la traînée](docs/figures/coupure_gps_avec_trainee_vol130.png)
+
+Avec la traînée, le drone reste sur son cercle pendant toute la coupure. Le détecteur ne fait
+aucune fausse alarme sur le vol nominal avec traînée (innovations maximales identiques à celles
+du vol 16). Limites : un vol par cas, un seul vent, constant pendant la coupure (le test
+d'ArduPilot signale qu'un vent qui change pendant la navigation à l'estime est le cas
+difficile) ; au vol 131, ArduPilot change de cœur EKF principal au bout de 41 s sans GPS, alors
+que l'erreur est mesurée sur le cœur 0. Une fois le GPS écarté, ses innovations disparaissent :
+le détecteur ne peut plus dire quand le GPS redevient fiable, il faudra un autre critère.
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -364,6 +408,11 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/comparer_en_ligne.py <trace.csv> <dossier_jeu_donnees> <log>` : compare la trace d'un
   vol fait avec `--detecteur` à l'analyse du log du même vol (débit, décalage d'horloge, valeurs,
   délais et fausses alarmes).
+- `scripts/erreur_navigation.py <log.BIN> [image.png [titre]]` : erreur de navigation réelle
+  (position du simulateur contre position estimée, cœur 0), distance au centre du cercle, temps
+  passé dans la zone surveillée et vent estimé, avant, pendant et après une perturbation GPS ;
+  figure de la trajectoire vue de dessus et des erreurs. Résultats :
+  `docs/figures/coupure_gps_sans_trainee_vol23.png` et `coupure_gps_avec_trainee_vol130.png`.
 - `scripts/detecteur_ml.py <dossier_jeu_donnees> <dernier_log_apprentissage>` : Isolation
   Forest entraîné sur le nominal des logs jusqu'à `dernier_log_apprentissage`, détail vol par vol
   sur les logs suivants (délai, part de la panne en alarme, fausses alarmes, état dégradé).
@@ -410,7 +459,11 @@ retire la panne si l'altitude descend sous 8 m. Le journal du vol est écrit dan
 rampe sur les 60 s de panne, valeur finale en m/s²), `gyro` (biais de gyroscope X des trois IMU,
 rad/s), `bruit_gyro` (bruit aléatoire de gyroscope des trois IMU, `SIM_GYR*_RND`, amplitude
 radians(valeur) × gaz) et `bloque` (accéléromètre de l'IMU 1 seule forcé à cette valeur sur ses
-trois axes, `SIM_ACCEL1_FAIL`). Le bruit d'accéléromètre `SIM_ACC*_RND` n'est pas utilisé : dans
+trois axes, `SIM_ACCEL1_FAIL`). Pour le GPS, en plus des coupures : `jam` (brouillage simulé,
+`SIM_GPS1_JAM` : perte du signal puis fix, satellites, vitesse et position erratiques), et avec
+`--amplitude` en mètres, `leurre` et `leurre_rampe` (position GPS décalée vers le nord,
+`SIM_GPS1_GLTCH_X`, d'un coup ou progressivement sur 60 s, le fix et la vitesse restant
+corrects). Le bruit d'accéléromètre `SIM_ACC*_RND` n'est pas utilisé : dans
 le simulateur, il n'agit que si une vibration (`SIM_VIB_FREQ` ou `SIM_VIB_MOT_MAX`) est réglée.
 Le vent optionnel (m/s, degrés d'où il vient, m/s) est réglé avant
 le décollage, uniforme en altitude. `--injection` fixe l'instant d'injection après l'entrée en
@@ -427,6 +480,10 @@ détecteur se prépare une fois, à partir du jeu de données des vols d'apprent
 python scripts/detecteur_en_ligne.py preparer data/jeu_donnees 49 data/detecteur_en_ligne.joblib
 scripts/lancer_vol.sh biais --amplitude 0.3 --detecteur
 ```
+
+`--trainee` active l'estimation du vent par la traînée et désactive le failsafe de navigation à
+l'estime (`FS_DR_ENABLE 0`, qui sinon ferait rentrer le drone). `--bascule T` (vol nominal) fait
+passer l'EKF, à T s de cercle, sur un jeu de sources sans GPS pendant 60 s, puis le ramène au GPS.
 
 ### Vol manuel
 
@@ -500,9 +557,9 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Récupération : sur alarme du détecteur en vol, faire atterrir le drone, et comparer à « ne rien
-  faire » et au failsafe EKF d'ArduPilot, avec l'erreur de navigation réelle (position simulée
-  contre position estimée).
+- Récupération, partie B : sur brouillage et leurrage GPS, comparer « ne rien faire », le failsafe
+  d'ArduPilot (atterrissage), ArduPilot avec la traînée, et une réponse pilotée par le détecteur
+  (écarter le GPS, continuer le cercle à l'estime, revenir au GPS quand il redevient cohérent).
 - Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
   saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.
 - Pannes sur un seul capteur (comparaison entre capteurs redondants) ; ajout de vibrations des
