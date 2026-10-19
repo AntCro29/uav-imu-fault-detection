@@ -11,11 +11,12 @@ puis seuil qui s'adapte au niveau des innovations) et premier détecteur par mac
 (Isolation Forest entraîné sur des vols nominaux), comparés puis combinés sur une campagne de
 test de 60 vols neufs, dont quatre types de panne jamais vus pendant les réglages. Les quatre
 détecteurs tournent aussi en vol, sur le flux MAVLink, avec les mêmes alarmes que l'analyse des
-logs. La récupération est commencée par la navigation sans GPS : estimer le vent permet au drone de
-continuer sa mission de surveillance pendant une coupure GPS. La classification du type de panne
+logs. Récupération : une première réponse aux pannes GPS (écarter le GPS, continuer la mission de
+surveillance à l'estime, revenir au GPS) bat les réactions par défaut d'ArduPilot sur le brouillage
+et sur un leurre en échelon, mais pas encore sur un leurre lent. La classification du type de panne
 n'est pas encore abordée.
 
-Cent trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Cent quarante-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -51,9 +52,11 @@ Cent trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) 
 | 122 à 124 | automatique | Campagne de test, accéléromètre de l'IMU 1 seule bloqué à 0,01 m/s² sur ses trois axes, sans vent, 3 et 6 m/s |
 | 125 à 128 | automatique | Détecteur en vol : nominal sous vent 6 m/s venant de 30°, turbulence 2 ; biais 0,3 m/s² sans vent ; décalage magnétomètre sous vent 6 m/s venant de 240°, turbulence 2 ; dérive 0,5 m/s² sans vent |
 | 129 à 131 | automatique | Navigation sans GPS, vent 6 m/s venant de 0°, turbulence 2, vent estimé par la traînée : nominal ; coupure GPS de 60 s ; abandon volontaire du GPS par l'EKF pendant 60 s |
+| 132 | automatique | Mise au point de la réponse R3 : leurre GPS de 100 m en échelon, vent 6 m/s venant de 0°, turbulence 2 |
+| 133 à 149 | automatique | Récupération, même vent : brouillage GPS, leurre de 100 m en échelon, leurre en rampe jusqu'à 100 m, biais d'accéléromètre de 0,5 m/s² (vol témoin), chacun avec quatre réponses (rien, ArduPilot par défaut, ArduPilot avec traînée, R3) ; nominal avec R3 |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 131 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 149 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -363,8 +366,73 @@ aucune fausse alarme sur le vol nominal avec traînée (innovations maximales id
 du vol 16). Limites : un vol par cas, un seul vent, constant pendant la coupure (le test
 d'ArduPilot signale qu'un vent qui change pendant la navigation à l'estime est le cas
 difficile) ; au vol 131, ArduPilot change de cœur EKF principal au bout de 41 s sans GPS, alors
-que l'erreur est mesurée sur le cœur 0. Une fois le GPS écarté, ses innovations disparaissent :
-le détecteur ne peut plus dire quand le GPS redevient fiable, il faudra un autre critère.
+que l'erreur est mesurée sur le cœur 0. Une fois le GPS écarté, ses innovations ne sont plus mises
+à jour : le détecteur ne peut plus dire quand le GPS redevient fiable, il faudra un autre critère.
+
+### Récupération, partie B : brouillage et leurrage GPS (vols 132 à 149)
+
+**La réponse proposée, R3** (`scripts/recuperation.py`, `vol_auto.py --reponse r3`), traînée activée :
+
+- **écarter le GPS** (bascule sur le jeu de sources sans GPS) si le fix 3D est perdu pendant
+  0,5 s, ou si le seuil adaptatif donne l'alarme d'abord sur l'innovation de position (SP) seule
+  alors que le fix est bon. Les innovations disent qu'il y a un désaccord, pas qui a tort : un
+  biais d'accéléromètre peut aussi faire monter SP, d'où un vol témoin. Seul le seuil adaptatif
+  sert à cette décision, car l'Isolation Forest ne dit pas quel canal est en cause ;
+- une fois le GPS écarté, ses innovations ne sont plus mises à jour (ArduPilot renvoie la dernière
+  valeur calculée), le détecteur ne peut donc plus juger le GPS : la décision est mémorisée. **Retour au GPS** quand sa position reste à moins de 25 m de la position estimée à
+  l'estime pendant 5 s (25 m : rayon au-delà duquel l'EKF se recale lui-même sur le GPS) ;
+  pas de nouvelle exclusion pendant 10 s après un retour ; **RTL en dernier recours** après
+  2 minutes sans GPS fiable.
+
+**Comparée à** : R0 rien (`FS_EKF_ACTION 0`) ; R1 ArduPilot par défaut (atterrissage sur
+failsafe EKF) ; R2 ArduPilot par défaut avec la traînée (et donc son retour au point de départ dès
+qu'il navigue à l'estime). Pannes simulées : brouillage (`SIM_GPS1_JAM` : perte du signal puis
+fix, satellites, position et vitesse erratiques), leurre de 100 m vers le nord en échelon ou en
+rampe sur 60 s (`SIM_GPS1_GLTCH_X`, fix et vitesse GPS corrects). Un vol par case, vent 6 m/s
+venant du nord, panne de 120 à 180 s ; mesures de `scripts/erreur_navigation.py` pendant la
+panne (zone surveillée : 60 m autour du centre du cercle).
+
+| Panne | R0 rien | R1 ArduPilot | R2 ArduPilot + traînée | R3 |
+|---|---|---|---|---|
+| Brouillage (vols 133 à 136) | erreur 2 657 m, 51 % dans la zone | atterrissage à 124,9 s, posé à ≈ 180 m | atterrissage à 124,9 s | **erreur 14 m, 100 %, mission poursuivie** |
+| Leurre en échelon (137 à 140) | 100 m, 34 % | 100 m, 33 %, aucun failsafe | retour au départ à 130 s, vers une position faussée | **5,3 m, 100 %** |
+| Leurre en rampe (141 à 144) | 98,5 m, 57 % | identique | identique, retour au départ à 190 s | **98,5 m, 57 % : échec** |
+| Témoin : biais d'accéléromètre 0,5 m/s² (145 à 148) | 0,5 m, 100 % | identique | identique | identique, **GPS non écarté** |
+| Nominal (149) | | | | aucune action |
+
+![Brouillage : les quatre réponses](docs/figures/brouillage_4_reponses.png)
+![Leurre en échelon : les quatre réponses](docs/figures/leurre_echelon_4_reponses.png)
+
+- **Brouillage** : le récepteur brouillé fournit par moments des positions et des vitesses fausses
+  avec un fix valide, et l'EKF les accepte (plus de 2,6 km d'erreur). ArduPilot atterrit en
+  4,9 s, sous le vent et hors de la zone. R3 écarte le GPS en 0,6 s et garde le cercle.
+- **Leurre en échelon** : l'EKF rejette d'abord le saut, puis, son incertitude dépassant 25 m,
+  se recale sur la fausse position au bout d'environ 10 s ; le drone tourne alors 100 m trop au
+  sud en croyant être sur son cercle. Le failsafe d'ArduPilot ne voit rien ; avec la traînée, son
+  retour au départ se fait vers la position faussée. R3 écarte le GPS en 0,5 s, avant que l'EKF
+  ne l'accepte : c'est le cas où un détecteur par innovations apporte le plus.
+- **Leurre en rampe : R3 échoue.** Il écarte le GPS en 0,6 s, mais 5 s plus tard le leurre n'a
+  décalé la position que de 8,6 m, sous les 25 m : R3 conclut que le GPS est redevenu cohérent et
+  y revient, puis l'EKF suit le leurre. Un leurre qui avance à la vitesse *v* ne dépasse 25 m
+  qu'au bout de 25 / *v* secondes : il faudrait observer plus longtemps avant de revenir, et un
+  leurre plus lent que la dérive de la navigation à l'estime resterait de toute façon invisible
+  avec cette méthode.
+
+![Leurre en rampe : R3 revient au GPS trop tôt](docs/figures/leurre_rampe_4_reponses.png)
+
+- **Témoin** : le biais d'accéléromètre fait monter SV en premier, R3 n'écarte pas le GPS ; avec
+  un GPS sain, l'EKF compense ce biais seul (0,5 m d'erreur pour toutes les réponses).
+- R3 a fait une exclusion à tort, brève (5 s), 10 s après son retour au GPS à la fin du
+  brouillage, pendant le recalage de l'EKF.
+
+Limites : un vol par case, un seul vent et un seul cap à l'injection ; le vol témoin ne couvre
+qu'une configuration, alors que d'autres vents avaient fait réagir SP en premier à un biais
+d'accéléromètre avec le seuil fixe ; leurres simplifiés (vitesse GPS non décalée). Constaté
+après la campagne dans les traces : pendant l'exclusion, la valeur figée de SP (26,41 après le
+leurre en échelon) continue d'alimenter le détecteur, si bien qu'après le retour au GPS le seuil
+adaptatif de SP, calculé sur les 30 dernières secondes, reste très haut et ce canal est aveugle
+environ 30 s ; l'exclusion à tort après le brouillage vient d'une alarme due au recalage de
+l'EKF, commencée pendant le délai de 10 s et encore active à sa fin.
 
 ## Version d'ArduPilot
 
@@ -413,6 +481,13 @@ ce dépôt, dans `~/drone/ardupilot`.
   passé dans la zone surveillée et vent estimé, avant, pendant et après une perturbation GPS ;
   figure de la trajectoire vue de dessus et des erreurs. Résultats :
   `docs/figures/coupure_gps_sans_trainee_vol23.png` et `coupure_gps_avec_trainee_vol130.png`.
+- `scripts/recuperation.py` : la réponse R3 aux pannes GPS (automate : écarter le GPS, revenir
+  au GPS, dernier recours), utilisée par `vol_auto.py --reponse r3`.
+- `scripts/comparer_reponses.py <image.png> <titre> <log:étiquette> [...]` : plusieurs vols
+  d'une même panne, une ligne par réponse (trajectoire, positions vraie et estimée en fonction du
+  temps, erreur de navigation, décisions de R3 et d'ArduPilot). Résultats :
+  `docs/figures/brouillage_4_reponses.png`, `leurre_echelon_4_reponses.png`,
+  `leurre_rampe_4_reponses.png`.
 - `scripts/detecteur_ml.py <dossier_jeu_donnees> <dernier_log_apprentissage>` : Isolation
   Forest entraîné sur le nominal des logs jusqu'à `dernier_log_apprentissage`, détail vol par vol
   sur les logs suivants (délai, part de la panne en alarme, fausses alarmes, état dégradé).
@@ -484,6 +559,9 @@ scripts/lancer_vol.sh biais --amplitude 0.3 --detecteur
 `--trainee` active l'estimation du vent par la traînée et désactive le failsafe de navigation à
 l'estime (`FS_DR_ENABLE 0`, qui sinon ferait rentrer le drone). `--bascule T` (vol nominal) fait
 passer l'EKF, à T s de cercle, sur un jeu de sources sans GPS pendant 60 s, puis le ramène au GPS.
+`--reponse` choisit la réponse à la panne : `rien` (défaut), `natif` (`FS_EKF_ACTION 1`),
+`natif_trainee` (idem avec la traînée et `FS_DR_ENABLE 2`) ou `r3` (détecteur, traînée et
+`scripts/recuperation.py`).
 
 ### Vol manuel
 
@@ -557,9 +635,10 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Récupération, partie B : sur brouillage et leurrage GPS, comparer « ne rien faire », le failsafe
-  d'ArduPilot (atterrissage), ArduPilot avec la traînée, et une réponse pilotée par le détecteur
-  (écarter le GPS, continuer le cercle à l'estime, revenir au GPS quand il redevient cohérent).
+- Récupération, R3 v2 : observer le GPS plus longtemps avant d'y revenir (leurre lent) et
+  allonger le délai après un retour ; validation sur des vols neufs (autres vents et caps,
+  plusieurs vols témoins, leurre plus lent pour mesurer la limite).
+- Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.
 - Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
   saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.
 - Pannes sur un seul capteur (comparaison entre capteurs redondants) ; ajout de vibrations des

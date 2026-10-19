@@ -57,16 +57,19 @@ class DetecteurEnLigne:
         self.gps = Persistance(cd.PERSISTANCE)
         self.recent = deque(maxlen=ml.LONG + ml.RETARD)   # assez pour l'écart-type 30 s décalé de 2 s
         self.score = np.nan
+        self.canaux = {c: False for c in ds.CANAUX}   # alarme du seuil adaptatif, canal par canal
+        self.alarme_gps = False
 
     def ajouter(self, sv, sp, sm, gps_fix):
         """Un échantillon (10 Hz) ; renvoie l'état d'alarme des quatre détecteurs."""
         x = {"SV": sv, "SP": sp, "SM": sm}
         self.recent.append(x)
-        gps = self.gps.ajouter((gps_fix or 0) < ds.FIX_3D)
-        # listes et non générateurs : any() s'arrêterait au premier canal en alarme, et les
-        # canaux suivants ne verraient pas l'échantillon
+        gps = self.alarme_gps = self.gps.ajouter((gps_fix or 0) < ds.FIX_3D)
+        # liste et dictionnaire, pas de générateur : any() s'arrêterait au premier canal en
+        # alarme, et les canaux suivants ne verraient pas l'échantillon
         fixe = any([self.fixe[c].ajouter(x[c] > self.seuil_fixe[c]) for c in ds.CANAUX])
-        adaptatif = any([self.adaptatif[c].ajouter(x[c]) for c in ds.CANAUX])
+        self.canaux = {c: self.adaptatif[c].ajouter(x[c]) for c in ds.CANAUX}
+        adaptatif = any(self.canaux.values())
         self.score = np.nan
         if len(self.recent) == self.recent.maxlen:
             F = ml.caracteristiques(pd.DataFrame(list(self.recent))).iloc[[-1]]

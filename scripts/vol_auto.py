@@ -2,6 +2,7 @@
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
+                           [--reponse rien|natif|natif_trainee|r3]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
 derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
@@ -38,6 +39,15 @@ navigue sans GPS), pour observer l'EKF sans changement de mode.
 --bascule T (vol nominal) : à T s de cercle, passe l'EKF sur le jeu de sources 2 (position et
 vitesse horizontales : aucune, hauteur : baromètre, cap : compas), réglé avant le décollage, par
 MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
+--reponse : réponse à la panne (partie B de la récupération) :
+  rien (défaut) : FS_EKF_ACTION 0, ArduPilot ne change pas de mode ;
+  natif : FS_EKF_ACTION 1, réglage par défaut d'ArduPilot (LAND sur failsafe EKF) ;
+  natif_trainee : idem, plus la traînée (--trainee) et FS_DR_ENABLE 2 (RTL dès que l'EKF navigue
+                  à l'estime, défaut d'ArduPilot) ;
+  r3 : notre réponse (recuperation.py) : détecteur et traînée actifs, FS_EKF_ACTION 0,
+       FS_DR_ENABLE 0 ; sur décision de R3, bascule sur le jeu de sources sans GPS (comme
+       --bascule), retour au jeu 1, ou RTL en dernier recours. Chaque décision est écrite dans
+       le journal, et l'état de R3 dans la trace du détecteur.
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -90,7 +100,7 @@ CERCLE_NOMINAL = 180
 CERCLE_APRES = 90
 ALT_DECOLLAGE = 15.0
 ALT_SECURITE = 8.0
-GUIDED, RTL, CIRCLE = 4, 6, 7
+GUIDED, RTL, CIRCLE, LAND = 4, 6, 7, 9
 
 arguments = argparse.ArgumentParser(description="Vol SITL automatique")
 arguments.add_argument("scenario", choices=list(SCENARIOS))
@@ -100,7 +110,11 @@ arguments.add_argument("--amplitude", type=float, help="biais (m/s²) ou décala
 arguments.add_argument("--detecteur", action="store_true", help="fait tourner les détecteurs pendant le cercle")
 arguments.add_argument("--trainee", action="store_true", help="estimation du vent par la traînée (EK3_DRAG_*)")
 arguments.add_argument("--bascule", type=float, help="instant (s de cercle) de la bascule sur le jeu de sources sans GPS")
+arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3"], default="rien",
+                       help="réponse à la panne")
 args = arguments.parse_args()
+if args.reponse == "r3":
+    args.detecteur = args.trainee = True
 if len(args.vent) not in (0, 3):
     arguments.error("le vent demande trois valeurs : vitesse direction turbulence")
 vent = args.vent or None
@@ -119,11 +133,14 @@ if panne is not None:
         arguments.error(f"le scénario {args.scenario} demande --amplitude")
 elif args.amplitude is not None or args.injection != 120.0:
     arguments.error("--injection et --amplitude sont sans objet pour un vol nominal")
+if args.bascule is not None and args.reponse == "r3":
+    arguments.error("--bascule et --reponse r3 s'excluent")
 if args.bascule is not None and (panne is not None or args.bascule + DUREE_BASCULE > CERCLE_NOMINAL):
     arguments.error(f"--bascule : vol nominal seulement, et T + {DUREE_BASCULE} s ≤ {CERCLE_NOMINAL} s")
 
 etat = {"alt": None, "arme": False, "mode": None, "crash": False, "fix": None, "sats": None,
-        "ekf_gps": set(), "ack_takeoff": None, "ack_source": None}
+        "ekf_gps": set(), "ack_takeoff": None, "ack_source": None,
+        "lat_gps": None, "lon_gps": None, "lat_est": None, "lon_est": None}
 params = {}
 t_debut = time.monotonic()
 t_cercle = None
@@ -133,6 +150,9 @@ en_cercle = False
 dernier_envoi = 0.0
 detecteur = trace = None
 alarmes = {}
+recup = None
+action = None       # décision de R3, exécutée par pomper() après le message qui l'a produite
+execution = False   # vrai pendant l'exécution d'une décision (pomper() y est appelé de nouveau)
 
 
 def journal(texte):
@@ -170,14 +190,19 @@ if args.detecteur:
     chemin_trace = os.path.join(DEPOT, "data", f"en_ligne_{time.strftime('%Y%m%d-%H%M%S')}.csv")
     fichier_trace = open(chemin_trace, "w", newline="")
     trace = csv.writer(fichier_trace)
-    trace.writerow(["t_cercle_s", "SV", "SP", "SM", "gps_fix", "score_ml"] + enligne.NOMS)
+    trace.writerow(["t_cercle_s", "SV", "SP", "SM", "gps_fix", "score_ml"] + enligne.NOMS + ["r3"])
     journal(f"Détecteur en ligne chargé ({FICHIER_DETECTEUR}), trace : {chemin_trace}")
+if args.reponse == "r3":
+    import recuperation
+    recup = recuperation.Recuperateur()
 
 
 def traiter(msg):
+    global action
     genre = msg.get_type()
     if genre == "GLOBAL_POSITION_INT":
         etat["alt"] = msg.relative_alt / 1000
+        etat["lat_est"], etat["lon_est"] = msg.lat / 1e7, msg.lon / 1e7
     elif genre == "HEARTBEAT" and msg.get_srcSystem() == 1 and msg.get_srcComponent() == 1:
         etat["arme"] = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
         etat["mode"] = msg.custom_mode
@@ -185,8 +210,8 @@ def traiter(msg):
         params[msg.param_id] = msg.param_value
     elif genre == "STATUSTEXT":
         journal(f"AP: {msg.text}")
-        # En RTL, « Hit ground » est le contact normal à l'atterrissage
-        if "Hit ground" in msg.text and etat["mode"] != RTL:
+        # En RTL ou LAND, « Hit ground » est le contact normal à l'atterrissage
+        if "Hit ground" in msg.text and etat["mode"] not in (RTL, LAND):
             etat["crash"] = True
         if "is using GPS" in msg.text:
             etat["ekf_gps"].add(msg.text.split()[1])
@@ -198,8 +223,12 @@ def traiter(msg):
         v = {c: enligne.quantifier(getattr(msg, champ)) for c, champ in
              (("SV", "velocity_variance"), ("SP", "pos_horiz_variance"), ("SM", "compass_variance"))}
         etats = detecteur.ajouter(v["SV"], v["SP"], v["SM"], etat["fix"])
+        if recup is not None:
+            action = action or recup.detecteur(time.monotonic(), detecteur.canaux, detecteur.alarme_gps,
+                                               etat["fix"])
         trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"],
-                        f"{detecteur.score:.4f}"] + [int(etats[n]) for n in enligne.NOMS])
+                        f"{detecteur.score:.4f}"] + [int(etats[n]) for n in enligne.NOMS]
+                       + [recup.etat if recup is not None else ""])
         for nom, actif in etats.items():
             if actif != alarmes[nom]:
                 texte = "ALARME" if actif else "fin d'alarme"
@@ -209,6 +238,9 @@ def traiter(msg):
         if (msg.fix_type, msg.satellites_visible) != (etat["fix"], etat["sats"]):
             etat["fix"], etat["sats"] = msg.fix_type, msg.satellites_visible
             journal(f"GPS : fix={msg.fix_type}, satellites={msg.satellites_visible}")
+        if recup is not None and en_cercle and etat["lat_est"] is not None:
+            action = action or recup.gps(time.monotonic(), msg.fix_type, msg.lat / 1e7, msg.lon / 1e7,
+                                         etat["lat_est"], etat["lon_est"])
 
 
 def pomper(duree, jusqua=None):
@@ -224,7 +256,10 @@ def pomper(duree, jusqua=None):
         msg = m.recv_match(blocking=True, timeout=0.2)
         if msg is not None:
             traiter(msg)
-        if panne_active and etat["alt"] is not None and etat["alt"] < ALT_SECURITE:
+        if action is not None and not execution:
+            executer()
+        # Seulement en CIRCLE : un LAND ou un RTL décidé par ArduPilot descend normalement
+        if panne_active and etat["mode"] == CIRCLE and etat["alt"] is not None and etat["alt"] < ALT_SECURITE:
             journal(f"SÉCURITÉ : altitude < {ALT_SECURITE} m, retrait immédiat de la panne")
             retirer()
         if etat["crash"]:
@@ -273,6 +308,23 @@ def basculer(jeu):
     journal(f"Jeu de sources EKF {jeu} (accepté)")
 
 
+def executer():
+    """Exécute la décision de R3, une seule à la fois (les commandes rappellent pomper())."""
+    global action, execution
+    decision, action, execution = action, None, True
+    if decision == "ecarter":
+        journal(f"R3 : GPS écarté ({recup.cause})")
+        basculer(2)
+    elif decision == "revenir":
+        journal(f"R3 : retour au GPS (écart {recup.ecart:.1f} m < {recuperation.ECART_RETOUR_M:g} m "
+                f"pendant {recuperation.DUREE_RETOUR_S:g} s)")
+        basculer(1)
+    elif decision == "recours":
+        journal(f"R3 : GPS écarté depuis plus de {recuperation.DUREE_MAX_S:g} s, dernier recours RTL")
+        changer_mode(RTL, "rtl")
+    execution = False
+
+
 def retirer():
     global panne_active
     panne_active = False
@@ -299,11 +351,14 @@ if vent is not None:
     regler({"SIM_WIND_SPD": vent[0], "SIM_WIND_DIR": vent[1], "SIM_WIND_TURB": vent[2]})
 
 # Paramètres
-regler({"FS_EKF_ACTION": 0})
-if args.trainee:
+regler({"FS_EKF_ACTION": 1 if args.reponse in ("natif", "natif_trainee") else 0})
+if args.reponse == "natif_trainee":
+    regler(TRAINEE)
+    regler({"FS_DR_ENABLE": 2})
+elif args.trainee:
     regler(TRAINEE)
     regler({"FS_DR_ENABLE": 0})
-if args.bascule is not None:
+if args.bascule is not None or args.reponse == "r3":
     regler(SOURCES_SANS_GPS)
 regler({"CIRCLE_RADIUS_M": 30})
 regler({"CIRCLE_RATE": 15})
@@ -379,7 +434,11 @@ else:
 en_cercle = False
 if trace is not None:
     fichier_trace.flush()
-changer_mode(RTL, "rtl")
+if not etat["arme"]:
+    # LAND ou RTL décidé par ArduPilot pendant la mission : le drone est déjà posé
+    journal(f"Drone déjà posé et désarmé (mode {etat['mode']}) : pas de RTL")
+elif etat["mode"] != RTL:
+    changer_mode(RTL, "rtl")
 # 900 s : sous 9 m/s, après une coupure GPS, le drone peut revenir de loin à ≈ 1 m/s (log 72)
 if not pomper(900, lambda: not etat["arme"] or (etat["alt"] is not None and etat["alt"] < 0.3)):
     sys.exit("Pas d'atterrissage après RTL")

@@ -6,13 +6,17 @@ l'EKF (ORGN) avec LATLON_TO_M d'ArduPilot. Position estimée : XKF1.PN/PE du cœ
 10 Hz, le cœur que lisent les détecteurs ; identique à POS à 1 cm près au log 37 quand les deux
 existent). POS n'est pas utilisé : il n'est presque plus enregistré quand l'EKF perd la position
 (1,2 message/s pendant la coupure GPS du log 37). t = 0 à l'entrée en CIRCLE.
-Perturbation : du premier au dernier vrai changement de SIM_GPS1_ENABLE, SIM_GPS1_JAM ou
-SIM_GPS1_GLTCH_X (PARM), ou de la bascule sur le jeu de sources 2 au retour au jeu 1 (EV 86 / 85).
-Mesures par phase (avant, pendant, après, jusqu'au RTL) :
+Perturbation : du premier au dernier vrai changement de SIM_GPS1_ENABLE, SIM_GPS1_JAM,
+SIM_GPS1_GLTCH_X ou SIM_ACC1_BIAS_X (PARM ; le biais d'accéléromètre sert de vol témoin) ; à défaut (vol --bascule), de la bascule sur le jeu de sources 2 au retour
+au jeu 1 (EV 86 / 85). Les bascules sont aussi listées (décisions de R3).
+Fin de la mission : retrait de la panne + 90 s (vol_auto.py), ou premier RTL pour un vol sans
+panne ; un LAND ou un RTL décidé par ArduPilot avant ne coupe pas l'analyse.
+Mesures par phase (avant, pendant, après) :
   - erreur de navigation |vraie − estimée| (max et à la fin de la phase) ;
   - distance vraie au centre du cercle (centre = moyenne de la position vraie sur le cercle avant
     la perturbation, après 10 s) : max, et part du temps dans la zone surveillée (< ZONE_M) ;
-  - vent estimé par l'EKF (XKF2.VWN/VWE, cœur 0) contre le vent réglé (SIM_WIND_SPD/DIR).
+  - vent estimé par l'EKF (XKF2.VWN/VWE, cœur 0) contre le vent réglé (SIM_WIND_SPD/DIR) ;
+  - part du temps en mission (mode CIRCLE), et changements de mode.
 """
 import math
 import sys
@@ -22,15 +26,17 @@ from pymavlink import mavutil
 
 M_PAR_DEGRE = 0.011131884502145034 * 1e7   # LATLON_TO_M d'ArduPilot (AP_Math/definitions.h:52)
 ZONE_M = 60.0                               # zone surveillée : 2 × le rayon du cercle (choix d'Antoine)
-PARAMS_GPS = ("SIM_GPS1_ENABLE", "SIM_GPS1_JAM", "SIM_GPS1_GLTCH_X")
+PARAMS_PANNE = ("SIM_GPS1_ENABLE", "SIM_GPS1_JAM", "SIM_GPS1_GLTCH_X", "SIM_ACC1_BIAS_X")
 SOURCES_SECONDAIRES, SOURCES_PRIMAIRES = 86, 85
 MODE_CIRCLE, MODE_RTL = 7, 6
+NOMS_MODES = {4: "GUIDED", 6: "RTL", 7: "CIRCLE", 9: "LAND"}
+CERCLE_APRES = 90
 DEBUT_CENTRE = 10.0
 
 
 def lire(chemin):
     mlog = mavutil.mavlink_connection(chemin)
-    sim, pos, vent, textes, debut_fin = [], [], [], [], []
+    sim, pos, vent, textes, debut_fin, bascules, modes = [], [], [], [], [], [], []
     origine = t_cercle = t_rtl = None
     depart, derniere, reglages = {}, {}, {}
     while True:
@@ -48,12 +54,13 @@ def lire(chemin):
         elif genre == "XKF2" and msg.C == 0:
             vent.append((t, msg.VWN, msg.VWE))
         elif genre == "MODE":
+            modes.append((t, msg.Mode))
             if msg.Mode == MODE_CIRCLE and t_cercle is None:
                 t_cercle = t
             elif msg.Mode == MODE_RTL and t_cercle is not None and t_rtl is None:
                 t_rtl = t
         elif genre == "PARM":
-            if msg.Name in PARAMS_GPS:
+            if msg.Name in PARAMS_PANNE:
                 if msg.Name not in derniere:
                     depart[msg.Name] = msg.Value
                 elif msg.Value != derniere[msg.Name]:
@@ -62,10 +69,12 @@ def lire(chemin):
             elif msg.Name in ("SIM_WIND_SPD", "SIM_WIND_DIR"):
                 reglages[msg.Name] = msg.Value
         elif genre == "EV" and msg.Id in (SOURCES_SECONDAIRES, SOURCES_PRIMAIRES):
-            debut_fin.append((t, msg.Id == SOURCES_SECONDAIRES))
+            bascules.append((t, msg.Id == SOURCES_SECONDAIRES))
         elif genre == "MSG":
             textes.append((t, msg.Message))
-    return origine, sim, pos, vent, textes, debut_fin, t_cercle, t_rtl, reglages
+    if not debut_fin:
+        debut_fin = bascules
+    return origine, sim, pos, vent, textes, debut_fin, bascules, modes, t_cercle, t_rtl, reglages
 
 
 def en_metres(lat, lng, origine):
@@ -75,7 +84,7 @@ def en_metres(lat, lng, origine):
 
 
 def analyser(chemin):
-    origine, sim, pos, vent, textes, debut_fin, t_cercle, t_rtl, reglages = lire(chemin)
+    origine, sim, pos, vent, textes, debut_fin, bascules, modes, t_cercle, t_rtl, reglages = lire(chemin)
     if origine is None or t_cercle is None:
         sys.exit("Log sans origine EKF ou sans entrée en CIRCLE")
     vrai = pd.DataFrame(sim, columns=["t", "lat", "lng", "alt"])
@@ -84,12 +93,17 @@ def analyser(chemin):
     df["n"], df["e"] = en_metres(df.lat, df.lng, origine)
     df["erreur"] = np.hypot(df.n - df.n_e, df.e - df.e_e)
     df["tc"] = df.t - t_cercle
-    fin = (t_rtl if t_rtl is not None else df.t.iloc[-1]) - t_cercle
-    df = df[(df.tc >= 0) & (df.tc <= fin)].reset_index(drop=True)
-
     debuts = [t - t_cercle for t, debut in debut_fin if debut]
     fins = [t - t_cercle for t, debut in debut_fin if not debut]
+    if debuts and fins and debut_fin is not bascules:
+        fin = fins[-1] + CERCLE_APRES
+    else:
+        fin = (t_rtl if t_rtl is not None else df.t.iloc[-1]) - t_cercle
+    df = df[(df.tc >= 0) & (df.tc <= fin)].reset_index(drop=True)
     t_pert = (debuts[0], fins[-1] if fins else fin) if debuts else None
+    # mode à chaque instant (dernier changement connu)
+    m = pd.DataFrame(modes, columns=["t", "mode"])
+    df = pd.merge_asof(df, m, on="t", direction="backward")
 
     avant = df[(df.tc >= DEBUT_CENTRE) & (df.tc < (t_pert[0] if t_pert else fin))]
     centre = (avant.n.mean(), avant.e.mean())
@@ -113,13 +127,21 @@ def analyser(chemin):
     phases = [("avant", DEBUT_CENTRE, t_pert[0] if t_pert else fin)]
     if t_pert:
         phases += [("pendant", t_pert[0], t_pert[1]), ("après", t_pert[1], fin)]
-    print(f"\n{'phase':<8} {'durée':>7} {'erreur nav. max':>16} {'à la fin':>9} {'dist. centre max':>17} {'dans la zone':>13}")
+    print(f"\n{'phase':<8} {'durée':>7} {'erreur nav. max':>16} {'à la fin':>9} {'dist. centre max':>17} "
+          f"{'dans la zone':>13} {'en mission':>11}")
     for nom, a, b in phases:
         p = df[(df.tc >= a) & (df.tc < b)]
         if p.empty:
             continue
         print(f"{nom:<8} {b - a:>6.0f}s {p.erreur.max():>15.1f}m {p.erreur.iloc[-1]:>8.1f}m "
-              f"{p.dist_centre.max():>16.1f}m {np.mean(p.dist_centre < ZONE_M) * 100:>12.0f}%")
+              f"{p.dist_centre.max():>16.1f}m {np.mean(p.dist_centre < ZONE_M) * 100:>12.0f}% "
+              f"{np.mean(p['mode'] == MODE_CIRCLE) * 100:>10.0f}%")
+    changements = [(t - t_cercle, NOMS_MODES.get(md, md)) for t, md in modes if 0 < t - t_cercle <= fin]
+    print("Changements de mode pendant la mission : "
+          + (", ".join(f"{nm} à {t:.1f} s" for t, nm in changements) if changements else "aucun"))
+    if bascules:
+        print("Jeux de sources : " + ", ".join(f"{'sans GPS' if b else 'GPS'} à {t - t_cercle:.1f} s"
+                                               for t, b in bascules if t > t_cercle))
     print("Messages pendant le cercle :")
     for t, texte in textes:
         if 0 <= t - t_cercle <= fin and any(k in texte for k in ("EKF", "lane", "aiding", "Failsafe", "GPS")):
