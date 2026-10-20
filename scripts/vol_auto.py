@@ -2,7 +2,7 @@
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
-                           [--reponse rien|natif|natif_trainee|r3]
+                           [--reponse rien|natif|natif_trainee|r3] [--bruit R]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
 derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
@@ -49,6 +49,10 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
        GPS (comme --bascule), retour au jeu 1, ou RTL en dernier recours (LAND si ArduPilot le
        refuse). Chaque décision est écrite dans le journal, et l'état de R3 dans la trace du
        détecteur.
+--bruit R : bruit de gyroscope des trois IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
+le décollage, même effet que le scénario bruit_gyro : radians(R) × gaz, donc nul moteurs
+arrêtés). Le commentaire du simulateur (AP_InertialSensor_SITL.cpp:235) donne 0,2 à 0,4 rad/s
+pour un vrai multirotor, soit R ≈ 30 à 60 avec les gaz de nos vols (≈ 0,38).
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -118,6 +122,7 @@ arguments.add_argument("--trainee", action="store_true", help="estimation du ven
 arguments.add_argument("--bascule", type=float, help="instant (s de cercle) de la bascule sur le jeu de sources sans GPS")
 arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3"], default="rien",
                        help="réponse à la panne")
+arguments.add_argument("--bruit", type=float, help="bruit de gyroscope pendant tout le vol (SIM_GYR*_RND)")
 args = arguments.parse_args()
 if args.reponse == "r3":
     args.detecteur = args.trainee = True
@@ -373,6 +378,10 @@ journal("Les deux cœurs EKF utilisent le GPS")
 if vent is not None:
     regler({"SIM_WIND_T": 1})
     regler({"SIM_WIND_SPD": vent[0], "SIM_WIND_DIR": vent[1], "SIM_WIND_TURB": vent[2]})
+
+# Bruit d'IMU pendant tout le vol
+if args.bruit is not None:
+    regler({nom: args.bruit for nom in SCENARIOS["bruit_gyro"]["params"]})
 
 # Paramètres
 regler({"FS_EKF_ACTION": 1 if args.reponse in ("natif", "natif_trainee") else 0})
