@@ -18,12 +18,15 @@ revenir au GPS dès que la navigation à l'estime avait trop dérivé (7 vols su
 validée sur 30 vols neufs, reprend le GPS sain dans 6 cas sur 7 et reste dans la zone surveillée
 pendant le leurre en échelon et le brouillage, mais accepte encore un leurre en rampe sur deux
 vents sur trois et a écarté le GPS à tort sur une dérive d'accéléromètre. Tous ces résultats ont
-été obtenus avec une IMU simulée sans bruit : avec un bruit de gyroscope ajouté, l'Isolation Forest
-fait de nombreuses fausses alarmes, le seuil adaptatif manque la moitié des biais de 0,3 m/s², et
-la navigation à l'estime dérive de 73 à 211 m en 60 s au lieu de 6 à 45 m. Le niveau de bruit
-réaliste reste à établir. La classification du type de panne n'est pas encore abordée.
+été obtenus avec une IMU simulée sans bruit ni vibration. Avec la vibration des moteurs que les
+tests d'ArduPilot reprennent d'un quadricoptère de 180 mm (6 à 12 m/s², un niveau jugé acceptable),
+les détecteurs calibrés sans vibration font de nombreuses fausses alarmes ou manquent les biais de
+0,3 m/s², la navigation à l'estime dérive de 131 à 304 m en 60 s au lieu de 6 à 45 m, et R3 ne
+reprend le GPS sain qu'une fois sur six : deux drones se posent à plus de 2 km du départ. Les
+détecteurs et la récupération sont donc à revoir sur un nominal avec vibration. La classification
+du type de panne n'est pas encore abordée.
 
-Deux cent trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Deux cent cinquante-trois vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -66,9 +69,13 @@ Deux cent trente et un vols ont été réalisés en SITL (ArduCopter, vol en cer
 | 210 | automatique | Vol pilote du bruit d'IMU : coupure GPS de 60 s avec traînée, bruit de gyroscope 60 pendant tout le vol, vent 6 m/s venant de 20°, turbulence 2 |
 | 211 à 228 | automatique | Bruit de gyroscope 30 (vols 211 à 219) puis 60 (220 à 228) pendant tout le vol, vent 6 m/s venant de 20°, 140° ou 260°, turbulence 2 : nominal, coupure GPS de 60 s avec traînée, biais de 0,3 m/s² |
 | 229 à 231 | automatique | Références sans bruit : coupure GPS de 60 s avec traînée sous les trois mêmes vents |
+| 232 | automatique | Vol pilote de la vibration des moteurs : coupure GPS de 60 s avec traînée, vibration pendant tout le vol, vent 6 m/s venant de 20°, turbulence 2 |
+| 233 à 241 | automatique | Vibration des moteurs pendant tout le vol, vent 6 m/s venant de 20°, 140° ou 260°, turbulence 2 : nominal, coupure GPS de 60 s avec traînée, biais de 0,3 m/s² |
+| 242 à 247 | automatique | Références sans vibration, mêmes vents : nominal, biais de 0,3 m/s² |
+| 248 à 253 | automatique | R3 v3 avec vibration, mêmes vents : leurre de 100 m en échelon, brouillage |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 231 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 253 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -577,10 +584,11 @@ décalée).
 
 Jusqu'ici, l'IMU simulée n'avait aucun bruit. Ces vols ajoutent un bruit de gyroscope pendant tout
 le vol (`vol_auto.py --bruit R` : `SIM_GYR1/2/3_RND = R`, réglé avant le décollage ; amplitude
-radians(R) × gaz, sur les trois axes). Niveaux 30 et 60 : d'après le commentaire du simulateur
-(`AP_InertialSensor_SITL.cpp:235`), un vrai multirotor a un bruit de 0,2 à 0,4 rad/s, soit R ≈ 30
-à 60 avec les gaz de nos vols (≈ 0,38). Ce bruit est blanc (un tirage par échantillon) ; sa
-ressemblance avec celui d'une vraie IMU après filtrage n'a pas été vérifiée. Plan : vent 6 m/s
+radians(R) × gaz, sur les trois axes). Niveaux 30 et 60 : choisis d'après un commentaire du
+simulateur (`AP_InertialSensor_SITL.cpp:235`) qui annonce 0,2 à 0,4 rad/s pour un vrai
+multirotor, soit R ≈ 30 à 60 avec les gaz de nos vols (≈ 0,38). **Ce choix était trop pessimiste**
+(voir « Ce que représente ce niveau de bruit » plus bas) : ces vols sont un cas extrême, pas un
+drone réaliste. Plan : vent 6 m/s
 venant de 20°, 140° ou 260° (turbulence 2), injection à 128, 135 ou 143 s ; pour chaque niveau,
 un nominal, une coupure GPS de 60 s avec traînée et un biais de 0,3 m/s² par vent, plus les trois
 coupures GPS sans bruit en référence. Détecteurs calibrés comme au test final (logs 19 à 49),
@@ -625,9 +633,121 @@ dérive à l'estime atteint déjà 22 à 60 m avec du bruit, et une exclusion du
 redevenu sain serait presque toujours refusé, et le drone sortirait de la zone pendant
 l'exclusion : R3 v3 ne tiendrait pas avec un bruit de ce niveau.
 
-Limites : trois vols par case, un seul vent ; bruit de gyroscope seulement (le bruit
-d'accéléromètre du simulateur demande une vibration, non réglée) ; niveau de bruit choisi d'après un
-seul commentaire du code.
+**Ce que représente ce niveau de bruit** (lu dans le code après ces vols, commit `14c871f`) :
+
+- Sans vibration réglée, le simulateur ajoute à chaque échantillon de gyroscope un tirage uniforme
+  entre −radians(R) × gaz et +radians(R) × gaz : un bruit blanc (`AP_InertialSensor_SITL.cpp:239-249`).
+- L'EKF n'utilise pas le gyroscope filtré à 20 Hz (`INS_GYRO_FILTER`, qui ne sert qu'au pilotage) :
+  il intègre les échantillons bruts en angles (`AP_InertialSensor_Backend.cpp:346`,
+  `AP_NavEKF3_Measurements.cpp:767`). Tout le bruit blanc lui parvient.
+- Avec `INS_FAST_SAMPLE = 1` (valeur par défaut, un masque de bits), seule la première IMU moyenne
+  8 tirages par échantillon (`AP_InertialSensor_SITL.cpp:314`). La deuxième IMU, qui alimente le
+  deuxième cœur EKF, est donc environ √8 ≈ 2,8 fois plus bruitée : c'est probablement pour cela que
+  seul ce cœur a arrêté de naviguer au bruit 60 (non vérifié).
+- Exprimé en marche aléatoire d'angle (°/√s, gaz ≈ 0,42), le bruit de la première / deuxième IMU vaut
+  0,08 / 0,27 au bruit 30 et 0,16 / 0,53 au bruit 60. L'EKF suppose 0,094 (`EK3_GYRO_P_NSE` = 0,015
+  rad/s, `AP_NavEKF3_core.cpp:1174`). Un gyroscope MEMS courant sur les drones, l'ICM-42688-P, est
+  donné à 2,8 mdps/√Hz, soit environ 0,003 °/√s (valeur relevée sur une source secondaire, non
+  vérifiée sur la fiche du constructeur) : 30 à 180 fois moins que nos vols.
+- Les 0,2 à 0,4 rad/s du commentaire correspondent en fait à la **vibration des moteurs**. Le test
+  `MotorVibration` d'ArduPilot (`Tools/autotest/arducopter.py:5644-5658`, « real values taken from
+  a 180mm Quad ») règle `SIM_VIB_MOT_MAX` 350, `SIM_GYR1_RND` 20 et `SIM_ACC1_RND` 5. Avec une
+  vibration réglée, `SIM_GYR*_RND` n'est plus un bruit blanc mais l'amplitude d'oscillations aux
+  fréquences des moteurs. C'est ce cas que testent les vols 232 à 253 (section suivante).
+
+Limites : trois vols par case, un seul vent ; bruit de gyroscope seulement ; bruit blanc beaucoup
+plus fort que celui d'une vraie IMU.
+
+### Vibration des moteurs : un nominal plus réaliste (vols 232 à 253)
+
+Ces vols reprennent les réglages du test `MotorVibration` d'ArduPilot sur les trois IMU
+(`vol_auto.py --vibration` : `SIM_VIB_MOT_MAX` 350, `SIM_GYR1/2/3_RND` 20, `SIM_ACC1/2/3_RND` 5,
+réglés avant le décollage). Le simulateur ajoute alors aux gyroscopes et aux accéléromètres une
+oscillation par moteur, à la fréquence de ce moteur (commande × 350 Hz, `SIM_Frame.cpp:901`), et
+plus aucun bruit blanc (`AP_InertialSensor_SITL.cpp:142-160, 245`). ArduPilot mesure une vibration
+de 6 m/s² en médiane et 12 m/s² au plus (`VIBE`, sans aucun écrêtage), contre 0,6 à 1,0 m/s² en
+médiane sans vibration. Sa documentation juge acceptable une vibration sous 30 m/s²
+([Measuring Vibration](https://ardupilot.org/copter/docs/common-measuring-vibration.html)) : ce
+n'est pas un cas extrême. Plan : comme pour le bruit, vent 6 m/s venant de 20°, 140° ou 260°
+(turbulence 2), injection à 128, 135 ou 143 s ; un nominal, une coupure GPS de 60 s avec traînée et
+un biais de 0,3 m/s² par vent avec vibration ; un nominal et un biais de 0,3 m/s² par vent sans
+vibration, en référence ; R3 v3 avec vibration face au leurre de 100 m en échelon et au brouillage.
+Détecteurs calibrés comme au test final (logs 19 à 49, sans vibration), sans aucun réglage retouché.
+Les 21 vols et le vol pilote se sont déroulés comme prévu (hauteur toujours au-dessus de 14,1 m).
+Avec vibration, le drone rebondit à chaque atterrissage, avec des alertes EKF au sol : toujours
+après la fin de la mission.
+
+**Innovations en vol nominal.** La vibration multiplie leur maximum par 4 à 10 : SV 0,30 à 0,47
+(contre 0,06 à 0,08 sans vibration), SP 0,10 à 0,15 (0,02), SM 0,10 à 0,20 (0,02 à 0,03), SH 0,04
+à 0,09 (0,00). Les seuils fixes de SP et SM sont franchis à répétition.
+
+![Innovations en vol nominal avec et sans vibration](docs/figures/vibration_innovations_nominal.png)
+
+**Détecteurs** (2 258 s de nominal : 1 372 s avec vibration, 886 s sans) :
+
+| Détecteur | Fausses alarmes avec vibration | Sans vibration | Biais de 0,3 m/s², avec vibration (×3) | Sans vibration (×3) |
+|---|---|---|---|---|
+| Seuil fixe | **155** | 0 | alarme déjà active à l'injection | 3,1 à 11,6 s |
+| Seuil adaptatif | 1 (vol 234) | 0 | **manqués tous les trois** | 1,7 à 2,1 s |
+| Isolation Forest (et combinaison) | **37** | 0 | alarme déjà active à l'injection | 2,7 à 3,2 s |
+
+Le seuil adaptatif suit le niveau relevé des innovations et ne fait presque pas de fausse alarme,
+mais le biais de 0,3 m/s² se perd dans la vibration. Les deux autres détecteurs sont en alarme
+avant même l'injection : leurs « détections » ne prouvent rien. Aucun des détecteurs actuels ne
+convient tel quel à un drone qui vibre ; il faudrait au moins les recalibrer sur des nominaux avec
+vibration.
+
+**Navigation à l'estime** (coupure GPS de 60 s avec traînée, erreur vraie en mètres, un vol par
+vent) :
+
+| Vibration | +10 s | +30 s | +60 s | Temps dans la zone pendant la coupure |
+|---|---|---|---|---|
+| Sans (vols 229 à 231) | 1 à 2 | 3 à 12 | 6 à 45 | 90 à 100 % |
+| Avec (vols 234, 237, 240) | 7 à 18 | 48 à 104 | 131 à 253 | 44 à 58 % |
+| Avec, vol pilote 232 | 17 | 124 | 304 | 25 % |
+
+Avec vibration, ArduPilot signale « EKF variance: position lost » et bascule sur le deuxième cœur
+environ 41 s après la coupure, mais aucun cœur n'arrête de naviguer. La vibration de
+l'accéléromètre, que l'EKF intègre deux fois pour obtenir la position, est la cause probable de
+cette dérive (non vérifié). Elle est du même ordre que celle du bruit blanc de gyroscope le plus
+fort (145 à 211 m au bruit 60), alors que cette vibration est jugée acceptable.
+
+![Erreur de navigation à l'estime avec et sans vibration](docs/figures/vibration_derive_estime.png)
+
+**R3 v3 avec vibration** (un vol par case ; distance au centre et pose mesurées sur la position
+vraie du simulateur) :
+
+| Vol | Panne, vent | Exclusion du GPS | Suite | Pendant la panne : erreur à la fin, distance max au centre, temps dans la zone | Posé à (du départ) |
+|---|---|---|---|---|---|
+| 248 | leurre, 20° | +0,7 s (SP en premier) | GPS repris 30 s après le retrait (écart 43,5 m, tolérance 78,8 m) | 113 m, 56 m, 100 % | 5 m |
+| 250 | leurre, 140° | +0,7 s (SP en premier) | dernier recours : RTL refusé faute de position, LAND | 319 m, 292 m, 46 % | 341 m |
+| 252 | leurre, 260° | +0,6 s (SP en premier) | dernier recours RTL | 153 m, 129 m, 59 % | 157 m |
+| 249 | brouillage, 20° | +0,6 s (fix perdu) | dernier recours RTL | 114 m, 143 m, 36 % | **2 013 m** |
+| 251 | brouillage, 140° | +0,7 s (fix perdu) | dernier recours RTL | 116 m, 114 m, 68 % | 144 m (après être passé à 2,1 km, 18 min de vol) |
+| 253 | brouillage, 260° | +0,7 s (fix perdu) | dernier recours RTL | 231 m, 231 m, 52 % | **2 456 m** |
+
+L'exclusion reste correcte dans les six vols. Mais R3 ne reprend le GPS sain qu'une fois sur six
+(contre six sur sept sans vibration) : la dérive à l'estime dépasse vite sa tolérance de retour.
+Le dernier recours devient alors dangereux : le RTL vise le départ avec une position estimée fausse
+de plusieurs centaines de mètres (ArduPilot coupe aussi le SmartRTL, « bad position »), et deux
+drones se posent à plus de 2 km.
+
+![Trajectoires vraies des vols R3 avec vibration](docs/figures/vibration_r3_trajectoires.png)
+
+**Piège de mesure** (vérifié dans le code) : quand un cœur EKF arrête de naviguer (« stopped
+aiding »), `getPosNE` renvoie la position GPS brute, en la signalant invalide
+(`AP_NavEKF3_Outputs.cpp:234-242`), et c'est elle que le log enregistre dans `XKF1`. L'erreur de
+navigation calculée par `erreur_navigation.py` compare alors le GPS à la vérité, plus l'estimée : ses
+valeurs ne valent rien après ce message (vol 250 après 204 s de cercle, vol 252 après 285 s). Les
+erreurs pendant la panne du tableau ci-dessus sont antérieures à ces messages. Le pilote, lui,
+respecte l'invalidité et garde la dernière position valide (`AP_AHRS.h:278`,
+`AP_InertialNav.cpp:18-21`). Pourquoi le drone du vol 250 revient alors vers le cercle n'est pas
+expliqué.
+
+Limites : un vol par case, un seul vent et un seul niveau de vibration ; le modèle de vibration du
+simulateur (une sinusoïde par moteur) n'a pas été comparé à des logs de vrais drones, et une
+dérive de 130 à 300 m en 60 s pour une vibration jugée acceptable reste à confirmer (un effet
+propre au simulateur n'est pas exclu).
 
 ## Version d'ArduPilot
 
@@ -734,8 +854,9 @@ trois axes, `SIM_ACCEL1_FAIL`). Pour le GPS, en plus des coupures : `jam` (broui
 `SIM_GPS1_JAM` : perte du signal puis fix, satellites, vitesse et position erratiques), et avec
 `--amplitude` en mètres, `leurre` et `leurre_rampe` (position GPS décalée vers le nord,
 `SIM_GPS1_GLTCH_X`, d'un coup ou progressivement sur 60 s, le fix et la vitesse restant
-corrects). Le bruit d'accéléromètre `SIM_ACC*_RND` n'est pas utilisé : dans
-le simulateur, il n'agit que si une vibration (`SIM_VIB_FREQ` ou `SIM_VIB_MOT_MAX`) est réglée.
+corrects). Le bruit d'accéléromètre `SIM_ACC*_RND` n'est pas un scénario de panne : dans
+le simulateur, il n'agit que si une vibration (`SIM_VIB_FREQ` ou `SIM_VIB_MOT_MAX`) est réglée
+(voir `--vibration`).
 Le vent optionnel (m/s, degrés d'où il vient, m/s) est réglé avant
 le décollage, uniforme en altitude. `--injection` fixe l'instant d'injection après l'entrée en
 CIRCLE (120 s par défaut) : le cercle étant très régulier (un tour ≈ 31 s), il fixe aussi le cap
@@ -758,7 +879,9 @@ passer l'EKF, à T s de cercle, sur un jeu de sources sans GPS pendant 60 s, pui
 `--reponse` choisit la réponse à la panne : `rien` (défaut), `natif` (`FS_EKF_ACTION 1`),
 `natif_trainee` (idem avec la traînée et `FS_DR_ENABLE 2`) ou `r3` (détecteur, traînée et
 `scripts/recuperation.py`). `--bruit R` ajoute un bruit de gyroscope aux trois IMU pendant tout
-le vol (`SIM_GYR*_RND = R`, réglé avant le décollage).
+le vol (`SIM_GYR*_RND = R`, réglé avant le décollage). `--vibration` ajoute pendant tout le vol la
+vibration des moteurs du test `MotorVibration` d'ArduPilot (`SIM_VIB_MOT_MAX` 350,
+`SIM_GYR*_RND` 20, `SIM_ACC*_RND` 5, trois IMU).
 
 ### Vol manuel
 
@@ -835,13 +958,15 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 - Récupération : juger le GPS pendant l'exclusion autrement que par un écart de position avec
   une estimée qui dérive ; distinguer un leurre d'une dérive d'accéléromètre avant d'écarter le
   GPS.
-- Bruit d'IMU : établir un niveau réaliste (traitement du bruit de gyroscope par ArduPilot,
-  `EK3_GYRO_P_NSE`, filtrage), puis recalibrer les détecteurs sur des nominaux bruités et les
-  tester sur des vols neufs ; ajouter le bruit d'accéléromètre (vibrations).
+- Vibration : vérifier si la dérive à l'estime de 130 à 300 m en 60 s est réaliste (logs de vrais
+  drones, modèle de vibration du simulateur) ; si oui, recalibrer les détecteurs sur des nominaux
+  avec vibration et les tester sur des vols neufs, et revoir le critère de retour au GPS de R3 et
+  son dernier recours (un RTL à l'estime peut finir à plusieurs kilomètres).
+- Mesure de l'erreur de navigation : ne plus lire `XKF1` après un « stopped aiding » (il contient
+  alors le GPS brut).
 - Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.
 - Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
   saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.
-- Pannes sur un seul capteur (comparaison entre capteurs redondants) ; ajout de vibrations des
-  moteurs dans la simulation, pour un nominal plus réaliste.
+- Pannes sur un seul capteur (comparaison entre capteurs redondants).
 - Traitement de la phase qui suit le retrait d'une panne.
 - Classification du type de panne.

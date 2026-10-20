@@ -2,7 +2,7 @@
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
-                           [--reponse rien|natif|natif_trainee|r3] [--bruit R]
+                           [--reponse rien|natif|natif_trainee|r3] [--bruit R] [--vibration]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
 derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
@@ -52,7 +52,14 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
 --bruit R : bruit de gyroscope des trois IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
 le décollage, même effet que le scénario bruit_gyro : radians(R) × gaz, donc nul moteurs
 arrêtés). Le commentaire du simulateur (AP_InertialSensor_SITL.cpp:235) donne 0,2 à 0,4 rad/s
-pour un vrai multirotor, soit R ≈ 30 à 60 avec les gaz de nos vols (≈ 0,38).
+pour un vrai multirotor, soit R ≈ 30 à 60 avec les gaz de nos vols (≈ 0,38) ; ces valeurs
+correspondent en fait à la vibration d'un quad de 180 mm (voir --vibration) : en bruit blanc,
+R = 30 ou 60 est bien plus fort que le bruit d'une vraie IMU (README).
+--vibration : vibration des moteurs pendant tout le vol, réglée avant le décollage avec les
+« valeurs réelles d'un quad de 180 mm » du test MotorVibration d'ArduPilot
+(Tools/autotest/arducopter.py:5644-5658), appliquées aux trois IMU : VIBRATION. Avec une
+vibration, SIM_GYR*_RND et SIM_ACC*_RND deviennent l'amplitude de sinusoïdes aux fréquences des
+moteurs au lieu d'un bruit blanc (AP_InertialSensor_SITL.cpp:245-279).
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -97,6 +104,8 @@ SCENARIOS = {
     "leurre_rampe": {"params": ["SIM_GPS1_GLTCH_X"], "attendu": 0.0, "injection": None, "retrait": 0.0,
                      "duree": 60, "echelle": 1 / M_PAR_DEGRE, "rampe": True},
 }
+VIBRATION = {"SIM_VIB_MOT_MAX": 350, "SIM_GYR1_RND": 20, "SIM_GYR2_RND": 20, "SIM_GYR3_RND": 20,
+             "SIM_ACC1_RND": 5, "SIM_ACC2_RND": 5, "SIM_ACC3_RND": 5}
 TRAINEE = {"EK3_DRAG_BCOEF_X": 9.5, "EK3_DRAG_BCOEF_Y": 9.5, "EK3_DRAG_MCOEF": 0.082}
 SOURCES_SANS_GPS = {"EK3_SRC2_POSXY": 0, "EK3_SRC2_VELXY": 0, "EK3_SRC2_POSZ": 1, "EK3_SRC2_VELZ": 0,
                     "EK3_SRC2_YAW": 1}
@@ -123,6 +132,7 @@ arguments.add_argument("--bascule", type=float, help="instant (s de cercle) de l
 arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3"], default="rien",
                        help="réponse à la panne")
 arguments.add_argument("--bruit", type=float, help="bruit de gyroscope pendant tout le vol (SIM_GYR*_RND)")
+arguments.add_argument("--vibration", action="store_true", help="vibration des moteurs pendant tout le vol")
 args = arguments.parse_args()
 if args.reponse == "r3":
     args.detecteur = args.trainee = True
@@ -382,6 +392,8 @@ if vent is not None:
 # Bruit d'IMU pendant tout le vol
 if args.bruit is not None:
     regler({nom: args.bruit for nom in SCENARIOS["bruit_gyro"]["params"]})
+if args.vibration:
+    regler(VIBRATION)
 
 # Paramètres
 regler({"FS_EKF_ACTION": 1 if args.reponse in ("natif", "natif_trainee") else 0})
