@@ -108,8 +108,8 @@ if __name__ == "__main__":
                 plt.Rectangle((0, 0), 1, 1, color=PANNE, label="panne"),
                 plt.Line2D([], [], color="#1baf7a", ls="--", label="R3 : GPS écarté"),
                 plt.Line2D([], [], color="#1baf7a", ls=":", label="R3 : retour au GPS"),
-                plt.Line2D([], [], color="#d6452a", label="LAND décidé par ArduPilot"),
-                plt.Line2D([], [], color="#eda100", label="RTL décidé par ArduPilot"),
+                plt.Line2D([], [], color="#d6452a", label="LAND en cours de mission"),
+                plt.Line2D([], [], color="#eda100", label="RTL en cours de mission (ArduPilot ou recours de R3)"),
                 plt.Line2D([], [], color="#999999", ls=":", label="zone surveillée (60 m)")]
     fig.legend(handles=poignees, loc="lower center", ncol=8, fontsize=8, frameon=False)
     fig.suptitle(titre, fontsize=12, x=0.01, ha="left")

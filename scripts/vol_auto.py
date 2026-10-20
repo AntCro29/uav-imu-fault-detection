@@ -45,9 +45,10 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
   natif_trainee : idem, plus la traînée (--trainee) et FS_DR_ENABLE 2 (RTL dès que l'EKF navigue
                   à l'estime, défaut d'ArduPilot) ;
   r3 : notre réponse (recuperation.py) : détecteur et traînée actifs, FS_EKF_ACTION 0,
-       FS_DR_ENABLE 0 ; sur décision de R3, bascule sur le jeu de sources sans GPS (comme
-       --bascule), retour au jeu 1, ou RTL en dernier recours. Chaque décision est écrite dans
-       le journal, et l'état de R3 dans la trace du détecteur.
+       FS_DR_ENABLE 0, FS_DR_TIMEOUT 120 ; sur décision de R3, bascule sur le jeu de sources sans
+       GPS (comme --bascule), retour au jeu 1, ou RTL en dernier recours (LAND si ArduPilot le
+       refuse). Chaque décision est écrite dans le journal, et l'état de R3 dans la trace du
+       détecteur.
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -56,7 +57,7 @@ stabilisation 10 s, rc 3 1500 (renvoyé toutes les 0,5 s), mode circle.
 Vol nominal : 180 s de cercle. Vol avec panne : cercle jusqu'à l'instant d'injection (120 s
 par défaut), injection (tous les paramètres envoyés d'affilée), durée de la panne, retrait,
 90 s de cercle.
-Puis mode rtl et attente du désarmement.
+Puis mode rtl (land si ArduPilot refuse le rtl) et attente du désarmement.
 """
 import argparse
 import csv
@@ -100,6 +101,11 @@ CERCLE_NOMINAL = 180
 CERCLE_APRES = 90
 ALT_DECOLLAGE = 15.0
 ALT_SECURITE = 8.0
+# R3 v3 : durée pendant laquelle Copter accepte la position estimée à l'estime (défaut 30 s, plage
+# documentée 0 à 120 s). Avec 30 s, Copter perdait la position avant le dernier recours de R3 et
+# refusait le RTL (vols 151, 155, 157, 159, 167, 169, 171). La navigation à l'estime commence
+# environ 10 s après l'exclusion du GPS : le délai tombe donc après le recours (120 s).
+DUREE_ESTIME_S = 120
 GUIDED, RTL, CIRCLE, LAND = 4, 6, 7, 9
 
 arguments = argparse.ArgumentParser(description="Vol SITL automatique")
@@ -296,11 +302,21 @@ def regler(valeurs):
     journal("param set " + ", ".join(f"{n} {v}" for n, v in valeurs.items()) + " (confirmé)")
 
 
-def changer_mode(numero, nom):
+def changer_mode(numero, nom, obligatoire=True):
     m.mav.set_mode_send(1, mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, numero)
     if not pomper(5, lambda: etat["mode"] == numero):
-        sys.exit(f"Mode {nom} refusé")
+        if obligatoire:
+            sys.exit(f"Mode {nom} refusé")
+        journal(f"Mode {nom} refusé")
+        return False
     journal(f"mode {nom}")
+    return True
+
+
+def rentrer():
+    """RTL, ou LAND si ArduPilot le refuse (le RTL exige une position, LAND non)."""
+    if not changer_mode(RTL, "rtl", obligatoire=False):
+        changer_mode(LAND, "land")
 
 
 def basculer(jeu):
@@ -324,12 +340,12 @@ def executer():
         alarmes.update({nom: False for nom in alarmes})
         basculer(2)
     elif decision == "revenir":
-        journal(f"R3 : retour au GPS (écart {recup.ecart:.1f} m < {recuperation.ECART_RETOUR_M:g} m "
-                f"pendant {recuperation.DUREE_RETOUR_S:g} s)")
+        journal(f"R3 : retour au GPS (écart {recup.ecart:.1f} m < tolérance {recup.tolerance:.1f} m, "
+                f"sous la tolérance pendant {recuperation.DUREE_RETOUR_S:g} s)")
         basculer(1)
     elif decision == "recours":
         journal(f"R3 : GPS écarté depuis plus de {recuperation.DUREE_MAX_S:g} s, dernier recours RTL")
-        changer_mode(RTL, "rtl")
+        rentrer()
     execution = False
 
 
@@ -366,6 +382,8 @@ if args.reponse == "natif_trainee":
 elif args.trainee:
     regler(TRAINEE)
     regler({"FS_DR_ENABLE": 0})
+if args.reponse == "r3":
+    regler({"FS_DR_TIMEOUT": DUREE_ESTIME_S})
 if args.bascule is not None or args.reponse == "r3":
     regler(SOURCES_SANS_GPS)
 regler({"CIRCLE_RADIUS_M": 30})
@@ -445,8 +463,8 @@ if trace is not None:
 if not etat["arme"]:
     # LAND ou RTL décidé par ArduPilot pendant la mission : le drone est déjà posé
     journal(f"Drone déjà posé et désarmé (mode {etat['mode']}) : pas de RTL")
-elif etat["mode"] != RTL:
-    changer_mode(RTL, "rtl")
+elif etat["mode"] not in (RTL, LAND):
+    rentrer()
 # 900 s : sous 9 m/s, après une coupure GPS, le drone peut revenir de loin à ≈ 1 m/s (log 72)
 if not pomper(900, lambda: not etat["arme"] or (etat["alt"] is not None and etat["alt"] < 0.3)):
     sys.exit("Pas d'atterrissage après RTL")

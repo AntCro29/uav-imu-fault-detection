@@ -13,12 +13,14 @@ test de 60 vols neufs, dont quatre types de panne jamais vus pendant les réglag
 détecteurs tournent aussi en vol, sur le flux MAVLink, avec les mêmes alarmes que l'analyse des
 logs. Récupération : une première réponse aux pannes GPS (écarter le GPS, continuer la mission de
 surveillance à l'estime, revenir au GPS) bat les réactions par défaut d'ArduPilot sur le brouillage
-et sur un leurre en échelon, mais pas encore sur un leurre lent. Sa deuxième version, validée sur
-30 vols neufs, échoue à revenir au GPS dès que la navigation à l'estime a trop dérivé (7 vols
-sur 15) : critère de retour à revoir. La classification du type de panne
-n'est pas encore abordée.
+et sur un leurre en échelon, mais pas encore sur un leurre lent. Sa deuxième version échouait à
+revenir au GPS dès que la navigation à l'estime avait trop dérivé (7 vols sur 15). La troisième,
+validée sur 30 vols neufs, reprend le GPS sain dans 6 cas sur 7 et reste dans la zone surveillée
+pendant le leurre en échelon et le brouillage, mais accepte encore un leurre en rampe sur deux
+vents sur trois et a écarté le GPS à tort sur une dérive d'accéléromètre. La classification du
+type de panne n'est pas encore abordée.
 
-Cent soixante-dix-neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Deux cent neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -57,9 +59,10 @@ Cent soixante-dix-neuf vols ont été réalisés en SITL (ArduCopter, vol en cer
 | 132 | automatique | Mise au point de la réponse R3 : leurre GPS de 100 m en échelon, vent 6 m/s venant de 0°, turbulence 2 |
 | 133 à 149 | automatique | Récupération, même vent : brouillage GPS, leurre de 100 m en échelon, leurre en rampe jusqu'à 100 m, biais d'accéléromètre de 0,5 m/s² (vol témoin), chacun avec quatre réponses (rien, ArduPilot par défaut, ArduPilot avec traînée, R3) ; nominal avec R3 |
 | 150 à 179 | automatique | Validation de R3 v2, vent 6 m/s venant de 90°, 180° ou 270°, turbulence 2 : leurres de 100 m en échelon et en rampe, leurre en rampe jusqu'à 30 m, brouillage, chacun sans réponse et avec R3 v2 ; vols témoins avec R3 v2 (biais 0,5 m/s² sous les trois vents, biais 0,3, dérive 0,5) ; trois nominaux avec R3 v2 |
+| 180 à 209 | automatique | Validation de R3 v3, même plan que les vols 150 à 179 avec un vent venant de 45°, 135° ou 225° |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 179 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 209 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -504,6 +507,65 @@ retour au GPS et le dernier recours sont à revoir.
 Limites : un vol par case ; vent de 6 m/s seulement ; IMU simulée sans bruit, donc navigation à
 l'estime plus précise que sur un vrai drone.
 
+### Récupération, R3 v3 : validation sur 30 vols neufs (vols 180 à 209)
+
+**Changements par rapport à la v2**, un par étape d'échec :
+
+- **tolérance de retour qui grandit avec la durée sans GPS** : le GPS est repris quand sa
+  position reste pendant 30 s à moins de 25 m + 0,6 m/s × (temps depuis l'exclusion) de la
+  position estimée. Mesurée sur les vols R3 v2, la dérive à l'estime atteignait 25 à 77 m 90 s
+  après l'exclusion. Le taux de 0,6 m/s est le plus petit qui, rejoué après coup sur ces vols,
+  aurait repris le GPS sain dans les 9 cas. Contrepartie prévue par ce rejeu (qui supposait
+  l'estimée exacte) : un leurre en échelon de moins d'environ 79 m, ou en rampe plus lent
+  qu'environ 1,4 m/s, peut être accepté ;
+- **`FS_DR_TIMEOUT` à 120 s** (maximum documenté, défaut 30 s) avec R3, pour que Copter accepte
+  encore la position estimée au moment du dernier recours ;
+- **LAND si ArduPilot refuse le RTL** de dernier recours.
+
+**Plan** : celui des vols 150 à 179, avec un vent venant de 45°, 135° ou 225° pour ne pas
+valider sur les vols qui ont servi au réglage.
+
+| Panne | R0 rien | R3 v3 |
+|---|---|---|
+| Leurre en échelon (vols 180 à 185) | erreur 100 m, 31 à 42 % dans la zone pendant la panne | **retour au GPS sain dans les trois cas**, 30 s après la fin du leurre ; erreur max 50, 21 et 27 m, 97 à 100 % dans la zone |
+| Leurre en rampe jusqu'à 100 m (186 à 191) | 98 m, 52 à 69 % | vent 225° : leurre refusé, **17 m pendant, 38 m après**, retour au GPS sain ; vents 45° et 135° : **GPS leurré repris** 30 s après l'exclusion, 98 m comme sans réponse |
+| Leurre en rampe jusqu'à 30 m (192 à 195) | 29,5 m | 29,5 m : GPS leurré repris, **aucun gain** (limite attendue) |
+| Brouillage (196 à 201) | **1 170 à 2 470 m**, 0 % dans la zone après la panne | vents 135° et 225° : **16 et 18 m pendant, 22 et 41 m après, 100 %**, retour au GPS ; vent 45° : **dernier recours**, RTL accepté, posé à 472 m du départ |
+| Témoins : biais 0,5 m/s² sous les trois vents et 0,3 (202 à 205), nominaux (207 à 209) | | GPS jamais écarté, erreur ≤ 0,6 m |
+| Témoin : dérive d'accéléromètre jusqu'à 0,5 m/s² (206) | | **GPS écarté à tort** 33 s après le début de la dérive, erreur jusqu'à 38 m, retour au GPS 30 s plus tard |
+
+![R3 v3 contre rien : leurre en rampe](docs/figures/r3v3_leurre_rampe.png)
+![R3 v3 contre rien : brouillage](docs/figures/r3v3_brouillage.png)
+
+**Ce qui marche** : aucun vol ne s'arrête sur un refus de RTL ; le GPS sain est repris dans
+6 cas sur 7 (2 sur 9 en v2) ; sur le leurre en échelon et deux brouillages sur trois, le drone
+reste dans la zone surveillée.
+
+**Trois échecs, expliqués dans les logs** :
+
+1. **Leurres en rampe acceptés (vols 187 et 189).** Trente secondes après l'exclusion, le leurre
+   décalait le GPS de 51 m vers le nord. Mais la position estimée avait elle-même dérivé de 12 à
+   16 m vers le nord : l'écart vu par R3 n'était que de 37 à 39 m, sous la tolérance de 43 m. Au
+   vol 191, la dérive n'était que de 5 m : écart de 47 m, leurre refusé. La règle compare le GPS
+   à une estimée qui dérive d'environ 0,5 m/s, dans un sens ou dans l'autre ; un leurre lent ou
+   une dérive défavorable passe donc d'un côté ou de l'autre. Pourquoi la dérive allait dans le
+   sens du leurre sur deux vols n'est pas établi.
+2. **Brouillage, vol 197.** Après la fin du brouillage, l'erreur de l'estimée (donc l'écart avec
+   le GPS redevenu sain) a suivi la tolérance (72 m pour 70 à +75 s, 79 m pour 79 à +90 s), puis
+   l'a dépassée (127 m pour 88 à +105 s) : le GPS n'a jamais été repris. Le RTL de dernier
+   recours se fait à l'estime, sans GPS : le drone s'est posé sans dommage, mais à 472 m de son
+   point de départ, en se croyant à environ 60 m.
+3. **Dérive d'accéléromètre prise pour un leurre (vol 206).** Elle fait monter SP en premier
+   avec un fix bon, la signature retenue pour le leurre. Écarter le GPS est alors contre-productif :
+   la navigation à l'estime se fait avec l'accéléromètre biaisé.
+
+La v3 n'a pas été retouchée après ces vols : le taux de 0,6 m/s réglé sur six cas ne se
+généraliserait pas. Comparer seulement des positions a ici sa limite ; il faudrait une autre
+information pour juger le GPS pendant l'exclusion.
+
+Limites : un vol par case ; vent de 6 m/s seulement ; IMU simulée sans bruit (la dérive serait
+plus forte sur un vrai drone) ; leurres simplifiés (vitesse GPS non décalée).
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -705,10 +767,9 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 
 ## Prochaines étapes
 
-- Récupération, R3 v3 : un critère de retour au GPS qui tolère une dérive à l'estime croissante
-  (déplacements cohérents et écart de position sous une tolérance qui grandit avec la durée sans
-  GPS), `FS_DR_TIMEOUT` allongé pour que le dernier recours reste possible, atterrissage si le
-  retour au départ est refusé ; validation sur des vols neufs.
+- Récupération : juger le GPS pendant l'exclusion autrement que par un écart de position avec
+  une estimée qui dérive ; distinguer un leurre d'une dérive d'accéléromètre avant d'écarter le
+  GPS.
 - Ajouter du bruit d'IMU à la simulation : la navigation à l'estime est aujourd'hui une
   intégration inertielle presque parfaite, et les détecteurs ont été réglés sans bruit.
 - Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.
