@@ -9,8 +9,9 @@ Colonnes :
   (nominal, panne, apres_panne),
   t_depuis_injection_s, t_depuis_retrait_s.
 
-Étiquetage tiré des messages PARM : la première valeur lue de chaque paramètre SIM sert de
-référence, seuls les vrais changements comptent. La panne va de la première injection au
+Étiquetage tiré des messages PARM : la dernière valeur lue de chaque paramètre SIM avant l'entrée
+en CIRCLE sert de référence (un réglage fait avant le décollage, comme vol_auto.py --bruit, fait
+partie du vol, ce n'est pas une panne), seuls les vrais changements comptent. La panne va de la première injection au
 dernier retrait ; tout ce qui suit le retrait est « apres_panne » (la durée à exclure du
 décompte des fausses alarmes se choisit à l'évaluation, grâce à t_depuis_retrait_s).
 type_panne et amplitude ne sont renseignés que sur les lignes panne et apres_panne (« aucune »
@@ -60,7 +61,7 @@ def lire_log(chemin):
         elif genre == "GPS" and getattr(msg, "I", 0) == 0:
             gps.append((t, msg.Status, msg.NSats))
         elif genre == "PARM" and msg.Name in TYPES:
-            if msg.Name not in dernieres_valeurs:
+            if msg.Name not in dernieres_valeurs or t_circle is None:
                 valeurs_depart[msg.Name] = msg.Value
             elif msg.Value != dernieres_valeurs[msg.Name]:
                 saine = 1.0 if TYPES[msg.Name] == "gps" else valeurs_depart[msg.Name]

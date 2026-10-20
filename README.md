@@ -17,10 +17,13 @@ et sur un leurre en échelon, mais pas encore sur un leurre lent. Sa deuxième v
 revenir au GPS dès que la navigation à l'estime avait trop dérivé (7 vols sur 15). La troisième,
 validée sur 30 vols neufs, reprend le GPS sain dans 6 cas sur 7 et reste dans la zone surveillée
 pendant le leurre en échelon et le brouillage, mais accepte encore un leurre en rampe sur deux
-vents sur trois et a écarté le GPS à tort sur une dérive d'accéléromètre. La classification du
-type de panne n'est pas encore abordée.
+vents sur trois et a écarté le GPS à tort sur une dérive d'accéléromètre. Tous ces résultats ont
+été obtenus avec une IMU simulée sans bruit : avec un bruit de gyroscope ajouté, l'Isolation Forest
+fait de nombreuses fausses alarmes, le seuil adaptatif manque la moitié des biais de 0,3 m/s², et
+la navigation à l'estime dérive de 73 à 211 m en 60 s au lieu de 6 à 45 m. Le niveau de bruit
+réaliste reste à établir. La classification du type de panne n'est pas encore abordée.
 
-Deux cent neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Deux cent trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -60,9 +63,12 @@ Deux cent neuf vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 | 133 à 149 | automatique | Récupération, même vent : brouillage GPS, leurre de 100 m en échelon, leurre en rampe jusqu'à 100 m, biais d'accéléromètre de 0,5 m/s² (vol témoin), chacun avec quatre réponses (rien, ArduPilot par défaut, ArduPilot avec traînée, R3) ; nominal avec R3 |
 | 150 à 179 | automatique | Validation de R3 v2, vent 6 m/s venant de 90°, 180° ou 270°, turbulence 2 : leurres de 100 m en échelon et en rampe, leurre en rampe jusqu'à 30 m, brouillage, chacun sans réponse et avec R3 v2 ; vols témoins avec R3 v2 (biais 0,5 m/s² sous les trois vents, biais 0,3, dérive 0,5) ; trois nominaux avec R3 v2 |
 | 180 à 209 | automatique | Validation de R3 v3, même plan que les vols 150 à 179 avec un vent venant de 45°, 135° ou 225° |
+| 210 | automatique | Vol pilote du bruit d'IMU : coupure GPS de 60 s avec traînée, bruit de gyroscope 60 pendant tout le vol, vent 6 m/s venant de 20°, turbulence 2 |
+| 211 à 228 | automatique | Bruit de gyroscope 30 (vols 211 à 219) puis 60 (220 à 228) pendant tout le vol, vent 6 m/s venant de 20°, 140° ou 260°, turbulence 2 : nominal, coupure GPS de 60 s avec traînée, biais de 0,3 m/s² |
+| 229 à 231 | automatique | Références sans bruit : coupure GPS de 60 s avec traînée sous les trois mêmes vents |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 209 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 231 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -564,7 +570,64 @@ généraliserait pas. Comparer seulement des positions a ici sa limite ; il faud
 information pour juger le GPS pendant l'exclusion.
 
 Limites : un vol par case ; vent de 6 m/s seulement ; IMU simulée sans bruit (la dérive serait
-plus forte sur un vrai drone) ; leurres simplifiés (vitesse GPS non décalée).
+plus forte sur un vrai drone, voir la section suivante) ; leurres simplifiés (vitesse GPS non
+décalée).
+
+### Bruit d'IMU : ce que valent les résultats précédents (vols 210 à 231)
+
+Jusqu'ici, l'IMU simulée n'avait aucun bruit. Ces vols ajoutent un bruit de gyroscope pendant tout
+le vol (`vol_auto.py --bruit R` : `SIM_GYR1/2/3_RND = R`, réglé avant le décollage ; amplitude
+radians(R) × gaz, sur les trois axes). Niveaux 30 et 60 : d'après le commentaire du simulateur
+(`AP_InertialSensor_SITL.cpp:235`), un vrai multirotor a un bruit de 0,2 à 0,4 rad/s, soit R ≈ 30
+à 60 avec les gaz de nos vols (≈ 0,38). Ce bruit est blanc (un tirage par échantillon) ; sa
+ressemblance avec celui d'une vraie IMU après filtrage n'a pas été vérifiée. Plan : vent 6 m/s
+venant de 20°, 140° ou 260° (turbulence 2), injection à 128, 135 ou 143 s ; pour chaque niveau,
+un nominal, une coupure GPS de 60 s avec traînée et un biais de 0,3 m/s² par vent, plus les trois
+coupures GPS sans bruit en référence. Détecteurs calibrés comme au test final (logs 19 à 49),
+sans aucun réglage retouché.
+
+**Fausses alarmes** (3 010 s de nominal) :
+
+| Détecteur | Sans bruit (vols 229 à 231) | Bruit 30 | Bruit 60 |
+|---|---|---|---|
+| Seuil fixe | 0 | 0 | **27** |
+| Seuil adaptatif | 0 | 0 | 0 |
+| Isolation Forest (et combinaison) | 0 | **57** | **90** |
+
+Le bruit relève le niveau nominal des innovations : sur les nominaux à 6 m/s, SP atteint au plus
+0,02 sans bruit, 0,03 avec le bruit 30 et 0,07 avec le bruit 60 (SM : 0,02, 0,06 et 0,11). Le
+seuil fixe (SP 0,04, SM 0,08) est dépassé au bruit 60 seulement. Pour l'Isolation Forest, toutes
+les variables (valeurs, moyennes, écarts-types) sortent dès le bruit 30 du domaine vu à
+l'entraînement : il ne peut pas servir tel quel sur une IMU bruitée.
+
+**Biais de 0,3 m/s²** : le seuil adaptatif suit le niveau du bruit, d'où aucune fausse alarme,
+mais il ne détecte que 3 biais sur 6 (1,7 à 2,3 s ; manqués aux vols 213, 222 et 228). Le seuil
+fixe les détecte tous les trois au bruit 30 (2,3 à 16,7 s, sans fausse alarme) ; au bruit 60, ses
+détections tombent au milieu de fausses alarmes et ne prouvent rien. Les délais de 0,0 s de
+l'Isolation Forest sont une alarme déjà active à l'injection, pas une détection.
+
+**Navigation à l'estime** (coupure GPS de 60 s avec traînée, erreur vraie en mètres, un vol par
+vent) :
+
+| Bruit | +10 s | +30 s | +60 s | Temps dans la zone pendant la coupure |
+|---|---|---|---|---|
+| 0 (vols 229 à 231) | 1 à 2 | 3 à 12 | 6 à 45 | 90 à 100 % |
+| 30 (212, 215, 218) | 4 à 6 | 22 à 39 | 73 à 144 | 73 à 87 % |
+| 60 (221, 224, 227) | 9 à 11 | 52 à 60 | 145 à 211 | 40 à 63 % |
+
+Le vol pilote 210 (bruit 60, même vent que le vol 221, injection à 120 s au lieu de 128 s) donne
+110 m à +60 s, contre 211 m : la dispersion d'un vol à l'autre est grande. Au bruit 60, un des deux
+cœurs EKF arrête de naviguer (« stopped aiding ») malgré la traînée, 16 à 25 s après la coupure,
+dans 3 vols sur 4.
+
+**Conséquence pour R3** : 30 s après l'exclusion, sa tolérance de retour vaut 43 m, alors que la
+dérive à l'estime atteint déjà 22 à 60 m avec du bruit, et une exclusion dure au moins 90 s. Le GPS
+redevenu sain serait presque toujours refusé, et le drone sortirait de la zone pendant
+l'exclusion : R3 v3 ne tiendrait pas avec un bruit de ce niveau.
+
+Limites : trois vols par case, un seul vent ; bruit de gyroscope seulement (le bruit
+d'accéléromètre du simulateur demande une vibration, non réglée) ; niveau de bruit choisi d'après un
+seul commentaire du code.
 
 ## Version d'ArduPilot
 
@@ -629,7 +692,8 @@ ce dépôt, dans `~/drone/ardupilot`.
   étiqueté, un CSV par log (innovations du cœur 0 à 10 Hz, statut GPS, phase du vol,
   type et amplitude de panne, étiquette `nominal` / `panne` / `apres_panne`, temps
   depuis l'injection et le retrait). Étiquettes tirées automatiquement des changements
-  de paramètres `SIM_*` enregistrés dans le log. Les CSV sont régénérables et ne sont
+  de paramètres `SIM_*` enregistrés dans le log pendant le cercle (un réglage fait avant, comme
+  le bruit de `--bruit`, sert de référence). Les CSV sont régénérables et ne sont
   pas versionnés (`data/`).
 - `scripts/tracer_cap_magneto.py <log.BIN> <image.png>` : cap du drone, intensité du
   champ mesuré par le compas 1 et innovation magnétomètre (SM) sur un axe de temps
@@ -693,7 +757,8 @@ l'estime (`FS_DR_ENABLE 0`, qui sinon ferait rentrer le drone). `--bascule T` (v
 passer l'EKF, à T s de cercle, sur un jeu de sources sans GPS pendant 60 s, puis le ramène au GPS.
 `--reponse` choisit la réponse à la panne : `rien` (défaut), `natif` (`FS_EKF_ACTION 1`),
 `natif_trainee` (idem avec la traînée et `FS_DR_ENABLE 2`) ou `r3` (détecteur, traînée et
-`scripts/recuperation.py`).
+`scripts/recuperation.py`). `--bruit R` ajoute un bruit de gyroscope aux trois IMU pendant tout
+le vol (`SIM_GYR*_RND = R`, réglé avant le décollage).
 
 ### Vol manuel
 
@@ -770,8 +835,9 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 - Récupération : juger le GPS pendant l'exclusion autrement que par un écart de position avec
   une estimée qui dérive ; distinguer un leurre d'une dérive d'accéléromètre avant d'écarter le
   GPS.
-- Ajouter du bruit d'IMU à la simulation : la navigation à l'estime est aujourd'hui une
-  intégration inertielle presque parfaite, et les détecteurs ont été réglés sans bruit.
+- Bruit d'IMU : établir un niveau réaliste (traitement du bruit de gyroscope par ArduPilot,
+  `EK3_GYRO_P_NSE`, filtrage), puis recalibrer les détecteurs sur des nominaux bruités et les
+  tester sur des vols neufs ; ajouter le bruit d'accéléromètre (vibrations).
 - Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.
 - Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
   saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.
