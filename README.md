@@ -25,11 +25,15 @@ les détecteurs calibrés sans vibration font de nombreuses fausses alarmes ou m
 lieu de 8 à 47 m, et R3 ne
 reprend le GPS sain qu'une fois sur six : deux drones finissent à plus de 2 km du départ. Un capteur de flux optique simulé, fusionné en
 permanence, corrige ce dernier point : avec la même vibration, R3 reprend le GPS sain dans 9 cas
-sur 9 et l'erreur de position reste sous 16 m pendant la panne (contre 15 à 319 m). Les
-détecteurs restent à recalibrer sur un nominal avec vibration. La classification
-du type de panne n'est pas encore abordée.
+sur 9 et l'erreur de position reste sous 16 m pendant la panne (contre 15 à 319 m). Recalibrés
+sur des vols nominaux avec vibration et flux optique, puis testés sur 32 pannes neuves, les
+détecteurs ne voient plus les petites pannes d'IMU : aucun ne détecte les biais d'accéléromètre
+de 0,3 et 0,5 m/s², les dérives ni le biais de gyroscope de 0,01 rad/s. Un autoencodeur (réseau
+de neurones entraîné à reconstruire le vol nominal) détecte 21 pannes sur 32 sans fausse alarme,
+le meilleur compromis des cinq détecteurs, mais son seuil dépend du tirage initial du réseau. La
+classification du type de panne n'est pas encore abordée.
 
-Deux cent soixante-sept vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Trois cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -78,9 +82,13 @@ Deux cent soixante-sept vols ont été réalisés en SITL (ArduCopter, vol en ce
 | 248 à 253 | automatique | R3 v3 avec vibration, mêmes vents : leurre de 100 m en échelon, brouillage |
 | 254 à 258 | automatique | Vols pilotes du flux optique, vent 6 m/s venant de 20°, turbulence 2 : nominal avec flux non fusionné, sans puis avec vibration ; avec vibration et flux fusionné en permanence : nominal, coupure GPS de 60 s avec traînée, nominal (altitude corrigée) |
 | 259 à 267 | automatique | R3 v3 avec vibration et flux optique, vent 6 m/s venant de 20°, 140° ou 260°, turbulence 2 : leurre de 100 m en échelon, leurre en rampe jusqu'à 100 m, brouillage |
+| 268 | automatique | Vérification du désarmement : nominal avec vibration et flux optique, vent 6 m/s venant de 260°, turbulence 2 |
+| 269 | automatique | Démonstration suivie en direct dans QGroundControl : leurre de 100 m en échelon avec R3, vibration et flux optique, vent 6 m/s venant de 140°, turbulence 2 |
+| 270 à 272 | automatique | Vols pilotes de la campagne suivante, vibration et flux optique, sans réponse : leurre en rampe jusqu'à 30 m (9 m/s venant de 300°), accéléromètre de l'IMU 1 bloqué (6 m/s venant de 200°), nominal (9 m/s venant de 120°) |
+| 273 à 328 | automatique | Campagne de l'autoencodeur, vibration et flux optique, sans réponse : 24 nominaux (sans vent à 9 m/s) et 32 pannes, quatre vols par type sous 3, 6, 6 et 9 m/s (biais d'accéléromètre 0,3 à 1,0 m/s², dérives jusqu'à 0,3 à 1,0 m/s², biais de gyroscope 0,01 et 0,02 rad/s, magnétomètre, leurres de 30 et 100 m en échelon et en rampe, brouillage, accéléromètre bloqué) ; vol 328 écrasé au décollage |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 267 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 328 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -828,6 +836,73 @@ Limites : un vol par case, un seul vent et un seul niveau de vibration ; le flux
 sol plat et texturé partout, à 15 m de hauteur, de jour, sans eau ni herbe qui bouge ; le bruit
 du flux est celui par défaut du simulateur, non comparé à un vrai capteur.
 
+### Autoencodeur sous vibration et flux optique (vols 273 à 328)
+
+Les détecteurs précédents ont été calibrés sans vibration. Pour les recalibrer et tester un
+autoencodeur dans les mêmes conditions, une campagne de 56 vols a été faite avec vibration et flux
+optique fusionné en permanence, sans réponse aux pannes (la signature complète de chaque panne est
+enregistrée) : 24 nominaux, du vent nul à 9 m/s, et 32 pannes, quatre vols par type sous des vents
+de 3, 6, 6 et 9 m/s. Le rôle de chaque nominal a été fixé avant la campagne
+(`docs/roles_campagne_nuit.csv`) : 14 pour l'apprentissage, 4 pour la validation, 6 pour le test.
+Le vol 328, un nominal d'apprentissage, s'est écrasé au décollage (alignement du cap de l'EKF raté
+sous vibration et vent) : il reste 13 vols d'apprentissage. Six vols finissent sans désarmement :
+au sol, le drone rebondit et redécolle (jusqu'à 19 m) et le banc de test refuse de couper les
+moteurs tant qu'il n'est pas posé ; leur mission est complète.
+
+**Autoencodeur** (`scripts/detecteur_ae.py`) : un réseau de neurones (scikit-learn, couches
+120 → 32 → 8 → 32 → 120) apprend à recopier les 3 dernières secondes des quatre innovations SV, SP,
+SH et SM, chacune divisée par son écart-type nominal, en passant par un goulot de 8 neurones. Le
+score est l'erreur de reconstruction : faible sur ce qui ressemble au nominal appris, d'autant
+plus grande que la fenêtre s'en écarte, sans plafond (contrairement à l'Isolation Forest). Seuil =
+plus haut score sur les 4 vols de validation + 10 % (1,56), persistance 0,5 s, même règle GPS que
+les autres détecteurs. Tous les réglages ont été fixés avant le test. Les quatre autres détecteurs
+gardent leurs règles et sont recalibrés sur les mêmes 13 vols (seuil fixe : SV 1,06, SP 0,36,
+SM 0,42, contre 0,24, 0,04 et 0,08 sans vibration).
+
+**Test, une seule exécution** (6 nominaux de test et partie nominale des 32 vols avec panne, soit
+4 908 s ; `comparer_detecteurs.py data/jeu_nuit docs/roles_campagne_nuit.csv`) :
+
+| | Seuil fixe | Seuil adaptatif | Isolation Forest | ML + adaptatif | Autoencodeur |
+|---|---|---|---|---|---|
+| Fausses alarmes | 0 | 13 | 0 | 13 | **0** |
+| Pannes détectées | 18 / 32 | 23 / 32 | 10 / 32 | 23 / 32 | **21 / 32** |
+
+| Panne (vols) | Seuil fixe | Seuil adaptatif | Isolation Forest | Autoencodeur |
+|---|---|---|---|---|
+| Biais d'accéléromètre 0,3 et 0,5 m/s² (3) | 0 | 0 | 0 | 0 |
+| Biais d'accéléromètre 1,0 m/s² (1) | 0 | 2,0 s | 4,5 s | 4,1 s |
+| Dérive d'accéléromètre jusqu'à 0,3 à 1,0 m/s² (4) | 0 | 0 | 0 | 0 |
+| Biais de gyroscope 0,01 rad/s (2) | 0 | 0 | 0 | 0 |
+| Biais de gyroscope 0,02 rad/s (2) | 0 | 2, en 5,1 à 7,2 s | 2, en 9,8 à 10,7 s | 0 |
+| Magnétomètre (4) | 4, en 0,5 à 0,6 s | 4, en 0,5 à 0,6 s | 2, en 27 à 44 s | 4, en 0,5 à 0,6 s |
+| Leurre GPS en échelon, 30 et 100 m (4) | 4, en 0,4 à 0,6 s | 4, en 0,4 à 0,6 s | 0 | 4, en 0,4 à 0,6 s |
+| Leurre en rampe jusqu'à 100 m (2) | 2, en 1,5 s | 2 (*) | 1, en 49 s | 2, en 0,5 s |
+| Leurre en rampe jusqu'à 30 m (2) | 0 | 2, en 0,6 à 1,5 s | 0 | 2, en 1,7 à 1,8 s |
+| Brouillage GPS (4) | 4, en 0,4 à 0,6 s (règle GPS, commune à tous) | 4 | 4 | 4 |
+| Accéléromètre de l'IMU 1 bloqué (4) | 4, en 0,8 à 0,9 s | 4, en 0,6 à 0,7 s | 0 | 4, en 0,8 s |
+
+(*) Au vol 282, l'alarme du seuil adaptatif était déjà active au moment de l'injection.
+La combinaison « ML + adaptatif » donne les mêmes détections que le seuil adaptatif seul.
+
+Ce qu'il faut en retenir :
+
+- **Sous vibration, aucun détecteur ne voit les petites pannes d'IMU** : biais d'accéléromètre de
+  0,3 et 0,5 m/s², dérives (même jusqu'à 1,0 m/s²) et biais de gyroscope de 0,01 rad/s sont
+  manqués par les cinq. Sans vibration, ces mêmes types de panne étaient presque tous détectés
+  (Isolation Forest : 41 pannes sur 42 au test final). Cause en cours d'analyse.
+- L'autoencodeur est le seul à n'avoir aucune fausse alarme tout en détectant plus que le seuil
+  fixe (rampe de leurre jusqu'à 30 m, biais de 1,0 m/s²). Le seuil adaptatif détecte deux pannes
+  de plus (biais de gyroscope de 0,02 rad/s) mais fait 13 fausses alarmes.
+- L'Isolation Forest, pourtant entraîné sur les mêmes vols, ne détecte plus que 10 pannes sur 32
+  (cause non cherchée).
+- **Le seuil de l'autoencodeur dépend du tirage initial du réseau** : sur 5 graines, 20 ou 21
+  pannes détectées, mais un seuil qui varie de 0,68 à 1,59 et 5 fausses alarmes avec l'une
+  d'elles. Quatre vols de validation ne suffisent pas à fixer ce seuil de façon fiable. Les
+  scores nominaux les plus hauts viennent des vols par vent faible (non expliqué).
+
+Limites : quatre vols par type de panne, un seul niveau de vibration, toujours avec flux optique ;
+le modèle n'est valable que dans cette configuration.
+
 ## Version d'ArduPilot
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09). ArduPilot est cloné hors de
@@ -855,10 +930,17 @@ ce dépôt, dans `~/drone/ardupilot`.
   détail vol par vol (délai, canal, comparaison avec la porte de l'EKF, alarmes après panne).
 - `scripts/detecteur_adaptatif.py <dossier_jeu_donnees> [k]` : détecteur à seuil adaptatif
   (k = 6 par défaut), détail vol par vol avec les mêmes métriques que le seuil fixe.
-- `scripts/comparer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> [k ...]` :
+- `scripts/comparer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration | roles.csv> [k ...]` :
   seuil fixe calibré et Isolation Forest entraîné sur les logs jusqu'à
   `dernier_log_calibration`, seuil adaptatif et combinaison « ML + adaptatif » ; tous évalués sur
-  les logs suivants (vols jamais vus).
+  les logs suivants (vols jamais vus). Avec un fichier de rôles (`docs/roles_campagne_nuit.csv`) :
+  calibration sur les logs d'apprentissage, autoencodeur en plus (seuil sur les logs de
+  validation), test sur les logs de test et de panne.
+- `scripts/detecteur_ae.py <dossier_jeu_donnees> <roles.csv> [--test]` : autoencodeur entraîné sur
+  le nominal des logs d'apprentissage, seuil fixé sur les logs de validation ; sans `--test`,
+  s'arrête là sans lire les logs de test, avec `--test`, détail vol par vol.
+- `docs/roles_campagne_nuit.csv` : rôle de chaque log de la campagne des vols 273 à 328
+  (apprentissage, validation, test, panne), fixé avant la campagne.
 - `scripts/tracer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> <log> <image.png> [titre]` :
   un vol avec ce que voient les quatre détecteurs (innovations et seuils, score de l'Isolation
   Forest, alarmes). Résultat sur le vol 104 : `docs/figures/test_derive_vol104.png`.
@@ -1051,16 +1133,15 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 - Récupération : juger le GPS pendant l'exclusion autrement que par un écart de position avec
   une estimée qui dérive ; distinguer un leurre d'une dérive d'accéléromètre avant d'écarter le
   GPS.
+- Comprendre pourquoi les petites pannes d'IMU sont invisibles sous vibration (en cours).
 - Vibration : vérifier si l'erreur à l'estime de 107 à 186 m en 60 s est réaliste (logs de vrais
-  drones, modèle de vibration du simulateur) ; si oui, recalibrer les détecteurs sur des nominaux
-  avec vibration et les tester sur des vols neufs, et revoir le critère de retour au GPS de R3 et
-  son dernier recours (un RTL à l'estime peut finir à plusieurs kilomètres).
-- Flux optique : comprendre l'exclusion à tort du vol 267 ; recalibrer les détecteurs sur un
-  nominal avec vibration et flux fusionné (l'innovation de vitesse y est plus haute) ; tester
-  d'autres vents et des vols plus longs sans GPS.
+  drones, modèle de vibration du simulateur) ; revoir le critère de retour au GPS de R3 et son
+  dernier recours sans flux optique (un RTL à l'estime peut finir à plusieurs kilomètres).
+- Flux optique : comprendre l'exclusion à tort du vol 267 ; tester d'autres vents et des vols plus
+  longs sans GPS.
+- Autoencodeur : fixer son seuil sur davantage de vols de validation (il varie du simple au double
+  selon la graine).
 - Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.
-- Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
-  saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.
 - Pannes sur un seul capteur (comparaison entre capteurs redondants).
 - Traitement de la phase qui suit le retrait d'une panne.
 - Classification du type de panne.

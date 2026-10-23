@@ -1,0 +1,56 @@
+log,role,scenario
+287,test,nominal
+288,apprentissage,nominal 1.5 45 0.5
+289,panne,biais 3 20 1 120 0.3
+290,panne,derive 3 65 1 128 0.3
+291,panne,gyro 3 110 1 135 0.01
+292,apprentissage,nominal 3 0 1
+293,apprentissage,nominal 6 15 2
+294,panne,magneto 3 155 1 143
+295,panne,leurre 3 200 1 120 100
+296,panne,leurre_rampe 3 245 1 128 100
+297,apprentissage,nominal 9 30 3
+298,apprentissage,nominal
+299,panne,jam 3 290 1 135
+300,panne,bloque 3 335 1 143 0.01
+301,panne,biais 6 110 2 128 0.5
+302,test,nominal 1.5 225 0.5
+303,validation,nominal 3 60 1
+304,panne,derive 6 155 2 135 0.5
+305,panne,gyro 6 200 2 143 0.02
+306,panne,magneto 6 245 2 120
+307,validation,nominal 6 60 2
+308,validation,nominal 9 90 3
+309,panne,leurre 6 290 2 128 100
+310,panne,leurre_rampe 6 335 2 135 100
+311,panne,jam 6 20 2 143
+312,apprentissage,nominal 3 120 1
+313,test,nominal 6 105 2
+314,panne,bloque 6 65 2 120 0.01
+315,panne,biais 6 200 2 135 0.5
+316,panne,derive 6 245 2 143 1.0
+317,apprentissage,nominal 9 150 3
+318,test,nominal 3 180 1
+319,panne,gyro 6 290 2 120 0.01
+320,panne,magneto 6 335 2 128
+321,panne,leurre 6 20 2 135 30
+322,apprentissage,nominal 6 150 2
+323,test,nominal 9 210 3
+324,panne,leurre_rampe 6 65 2 143 30
+325,panne,jam 6 110 2 120
+326,panne,bloque 6 155 2 128 0.01
+327,apprentissage,nominal 3 240 1
+328,apprentissage,nominal 6 195 2
+329,panne,biais 9 290 3 143 1.0
+330,panne,derive 9 335 3 120 1.0
+331,panne,gyro 9 20 3 128 0.02
+332,apprentissage,nominal 9 270 3
+333,apprentissage,nominal 3 300 1
+334,panne,magneto 9 65 3 135
+335,panne,leurre 9 110 3 143 30
+336,panne,leurre_rampe 9 155 3 120 30
+337,validation,nominal 6 240 2
+338,apprentissage,nominal 9 330 3
+339,panne,jam 9 200 3 128
+340,panne,bloque 9 245 3 135 0.01
+341,test,nominal 6 285 2
