@@ -33,7 +33,10 @@ détecteurs ne voient plus les petites pannes d'IMU : aucun ne détecte les biai
 de 0,3 et 0,5 m/s², les dérives ni le biais de gyroscope de 0,01 rad/s. Un autoencodeur (réseau
 de neurones entraîné à reconstruire le vol nominal) détecte 21 pannes sur 32 sans fausse alarme,
 le meilleur compromis des cinq détecteurs, mais son seuil dépend du tirage initial du réseau. La
-classification du type de panne n'est pas encore abordée.
+classification du type de panne n'est pas encore abordée. Cette invisibilité vient de la
+vibration elle-même, celle des gyroscopes comme celle des accéléromètres, qui ajoute à
+l'innovation de vitesse un bruit plus fort que l'effet de la panne ; l'EKF n'élargit pas son
+incertitude et le flux optique n'y est pour rien (vols 329 à 340).
 
 ## Sommaire
 
@@ -52,6 +55,7 @@ classification du type de panne n'est pas encore abordée.
 - [Vibration des moteurs : un nominal plus réaliste (vols 232 à 253)](#vibration-des-moteurs--un-nominal-plus-réaliste-vols-232-à-253)
 - [Flux optique : naviguer sans GPS sous vibration (vols 254 à 267)](#flux-optique--naviguer-sans-gps-sous-vibration-vols-254-à-267)
 - [Autoencodeur sous vibration et flux optique (vols 273 à 328)](#autoencodeur-sous-vibration-et-flux-optique-vols-273-à-328)
+- [Pourquoi les petites pannes d'IMU deviennent invisibles sous vibration (vols 329 à 340)](#pourquoi-les-petites-pannes-dimu-deviennent-invisibles-sous-vibration-vols-329-à-340)
 
 ## Premier détecteur à seuil (vols 5 à 11)
 
@@ -835,7 +839,7 @@ Ce qu'il faut en retenir :
 - **Sous vibration, aucun détecteur ne voit les petites pannes d'IMU** : biais d'accéléromètre de
   0,3 et 0,5 m/s², dérives (même jusqu'à 1,0 m/s²) et biais de gyroscope de 0,01 rad/s sont
   manqués par les cinq. Sans vibration, ces mêmes types de panne étaient presque tous détectés
-  (Isolation Forest : 41 pannes sur 42 au test final). Cause en cours d'analyse.
+  (Isolation Forest : 41 pannes sur 42 au test final). Cause analysée dans la section suivante.
 - L'autoencodeur est le seul à n'avoir aucune fausse alarme tout en détectant plus que le seuil
   fixe (rampe de leurre jusqu'à 30 m, biais de 1,0 m/s²). Le seuil adaptatif détecte deux pannes
   de plus (biais de gyroscope de 0,02 rad/s) mais fait 13 fausses alarmes.
@@ -848,3 +852,75 @@ Ce qu'il faut en retenir :
 
 Limites : quatre vols par type de panne, un seul niveau de vibration, toujours avec flux optique ;
 le modèle n'est valable que dans cette configuration.
+
+## Pourquoi les petites pannes d'IMU deviennent invisibles sous vibration (vols 329 à 340)
+
+Au test de l'autoencodeur, les biais d'accéléromètre de 0,3 et 0,5 m/s², les dérives et le biais
+de gyroscope de 0,01 rad/s échappent aux cinq détecteurs, alors qu'ils étaient presque tous
+détectés sans vibration. Trois explications étaient possibles : l'agitation normale du vol couvre
+l'effet de la panne ; l'EKF élargit lui-même son incertitude et rejette la panne comme du bruit ;
+le flux optique, fusionné en permanence, absorbe l'erreur.
+
+Méthode : une même panne (biais de 0,3 m/s² sur l'axe X des trois accéléromètres, 60 s), un même
+vent (6 m/s, turbulence 2, venant de 20° ou de 140°), le cœur EKF 0 que lisent les détecteurs, et
+deux fenêtres de 60 s : avant l'injection et pendant la panne. Grandeurs comparées : l'écart brut
+entre vitesse GPS et vitesse prédite (`XKF3`, en m/s), le rapport SV (`XKF4`), l'écart attendu par
+l'EKF (écart / (5 × SV), la porte de vitesse valant 5 : `AP_NavEKF3_PosVelFusion.cpp:970-980`),
+le biais appris (`XKF2.AX`), l'erreur d'inclinaison vraie (attitude du cœur 0 `XKF1` contre
+attitude simulée `SIM`) et l'erreur d'attitude que l'EKF s'attribue (`XKF4.errRP`).
+
+**L'EKF ne se protège pas lui-même.** ArduPilot a un mécanisme prévu pour la vibration
+(`badIMUdata`, `AP_NavEKF3_PosVelFusion.cpp:860-890`) : si les innovations de vitesse verticale
+du GPS et du baromètre ont le même signe et dépassent 3 σ, l'EKF suppose un bruit d'accéléromètre
+de 5,0 m/s² au lieu de 0,35 (`AP_NavEKF3_core.cpp:1176`) et cesse d'apprendre le biais pendant
+10 s ; Copter l'annonce par « Vibration compensation ON » (`ekf_check.cpp:289-320`). Il ne se
+déclenche pas ici : aucun message pendant le cercle, un écart attendu de 0,57 à 0,59 m/s dans
+toutes les configurations (donc une incertitude inchangée), et un biais appris comparable avec et
+sans vibration (+0,11 à +0,22 m/s² en 60 s). La deuxième explication est écartée.
+
+**Séparer les causes.** `vol_auto.py --vibration gyro` ou `--vibration acc` ne fait vibrer que
+les gyroscopes ou que les accéléromètres : dans le simulateur, l'amplitude des oscillations est
+proportionnelle à `SIM_GYR*_RND` et `SIM_ACC*_RND` (`AP_InertialSensor_SITL.cpp:152, 268`), et la
+mettre à 0 supprime la vibration de ce capteur. Douze vols : pour chacun des deux vents, un
+nominal et un biais de 0,3 m/s² avec vibration des gyroscopes seuls, des accéléromètres seuls, et
+avec flux optique permanent sans vibration. Déroulé conforme sur les 12 (réglages lus dans le
+log, injection à 128 ou 135 s de cercle, retrait 60 s plus tard, désarmement au sol), altitude
+vraie minimale en cercle de 13,3 à 14,9 m. Références : vols 243 et 245 (sans vibration) et 235
+et 238 (vibration complète), mêmes vents et même panne.
+
+| Configuration (vols) | Erreur d'inclinaison vraie, médiane | Écart de vitesse avant la panne, médiane (centile 95) | Écart pendant la panne, médiane | Biais appris en 60 s |
+|---|---|---|---|---|
+| Sans vibration (243, 245) | 0,12 à 0,15° | 0,05 (0,12) m/s | 0,18 m/s | +0,16 à +0,17 m/s² |
+| Flux optique, sans vibration (334, 340) | 0,08 à 0,11° | 0,05 (0,11) m/s | 0,17 à 0,19 m/s | +0,16 m/s² |
+| Gyroscopes seuls (330, 336) | 0,55 à 0,62° | 0,15 à 0,16 (0,34 à 0,39) m/s | 0,23 à 0,26 m/s | +0,11 à +0,14 m/s² |
+| Accéléromètres seuls (332, 338) | 0,46 à 0,47° | 0,21 à 0,22 (0,48 à 0,64) m/s | 0,28 à 0,32 m/s | +0,17 à +0,18 m/s² |
+| Vibration complète (235, 238) | 0,74 à 0,79° | 0,23 à 0,27 (0,59 à 0,62) m/s | 0,31 à 0,34 m/s | +0,14 à +0,22 m/s² |
+
+Ce qu'il faut en retenir :
+
+- **La panne est couverte par l'agitation normale** (première explication). Sans vibration,
+  l'écart pendant la panne (0,18 m/s) dépasse nettement le bruit d'avant la panne (centile 95 de
+  0,12 m/s). Avec n'importe quelle vibration, il reste sous ce centile 95 : le biais se noie dans
+  le bruit. Le rapport SV qu'utilisent les détecteurs est cet écart normalisé ; SP et SM
+  n'ont pas été examinés ici.
+- **Chaque vibration suffit seule à masquer la panne, par des chemins en partie différents.** Les
+  gyroscopes seuls donnent l'erreur d'attitude la plus grande (0,55 à 0,62°, soit une fausse
+  accélération horizontale g × sin θ d'environ 0,1 m/s², du même ordre que le biais) mais moins de
+  bruit de vitesse ; les accéléromètres seuls donnent moins d'erreur d'attitude mais plus de bruit
+  de vitesse, en particulier vertical (médiane 0,08 à 0,13 m/s contre 0,04). Le bruit de vitesse
+  ne passe donc pas seulement par l'erreur d'attitude : la vibration des accéléromètres entre aussi
+  directement dans la vitesse prédite.
+- **L'EKF ne voit pas sa propre erreur d'attitude** : il l'estime à 0,44 à 0,46° dans toutes les
+  configurations, y compris quand l'erreur vraie atteint 0,79°.
+- **Le flux optique n'y est pour rien** (troisième explication écartée) : sans vibration, la
+  signature de la panne est la même avec et sans flux.
+
+Conséquence pour la suite : sous vibration, une petite panne d'IMU ne peut pas se distinguer d'un
+vol normal en regardant l'innovation instant par instant ; il faudrait intégrer son effet dans le
+temps (le biais pousse toujours dans le même sens, la vibration non), ou disposer d'une référence
+indépendante (IMU redondante non touchée). Non testé.
+
+Limites : deux vols par configuration, un seul niveau de vibration, un seul vent, un seul type de
+petite panne (biais d'accéléromètre de 0,3 m/s²) ; les nominaux de cette campagne ne sont pas
+encore exploités. Analyse faite avec des scripts hors dépôt (lecture de `XKF1` à `XKF4`, `SIM` et
+`MSG` du cœur 0).

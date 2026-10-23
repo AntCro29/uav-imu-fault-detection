@@ -4,7 +4,7 @@ Numérotation : les vols manuels 1 à 4 sont les logs ArduPilot 13 à 16 ; à pa
 numéro du log = numéro du vol + 14 (vol 5 = `00000019.BIN`). Détail de chaque campagne dans
 [demarche.md](demarche.md).
 
-Trois cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Trois cent quarante vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -57,9 +57,10 @@ Trois cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cerc
 | 269 | automatique | Démonstration suivie en direct dans QGroundControl : leurre de 100 m en échelon avec R3, vibration et flux optique, vent 6 m/s venant de 140°, turbulence 2 |
 | 270 à 272 | automatique | Vols pilotes de la campagne suivante, vibration et flux optique, sans réponse : leurre en rampe jusqu'à 30 m (9 m/s venant de 300°), accéléromètre de l'IMU 1 bloqué (6 m/s venant de 200°), nominal (9 m/s venant de 120°) |
 | 273 à 328 | automatique | Campagne de l'autoencodeur, vibration et flux optique, sans réponse : 24 nominaux (sans vent à 9 m/s) et 32 pannes, quatre vols par type sous 3, 6, 6 et 9 m/s (biais d'accéléromètre 0,3 à 1,0 m/s², dérives jusqu'à 0,3 à 1,0 m/s², biais de gyroscope 0,01 et 0,02 rad/s, magnétomètre, leurres de 30 et 100 m en échelon et en rampe, brouillage, accéléromètre bloqué) ; vol 328 écrasé au décollage |
+| 329 à 340 | automatique | Séparation des causes de l'invisibilité des petites pannes d'IMU, sans réponse, vent 6 m/s venant de 20° (vols 329 à 334, injection à 128 s) ou de 140° (vols 335 à 340, injection à 135 s), turbulence 2 : nominal puis biais d'accéléromètre de 0,3 m/s², avec vibration des gyroscopes seuls, des accéléromètres seuls, puis flux optique permanent sans vibration |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 328 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 340 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de

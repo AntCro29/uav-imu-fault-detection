@@ -2,7 +2,7 @@
 
 Projet personnel, en cours : détecter automatiquement les pannes de capteurs d'un drone
 multirotor à partir de ce que voit son filtre de navigation, puis réagir sans abandonner la
-mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 328 vols, tous
+mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 340 vols, tous
 automatisés sauf les quatre premiers, qui ont servi à se familiariser avec l'interface.
 
 Titre visé : *Machine Learning Based IMU Fault Detection and Recovery for Autonomous UAVs*.
@@ -63,15 +63,15 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 
 | Étape | État | Résultat principal |
 |---|---|---|
-| Banc de vols automatique | fait | 328 vols, protocole identique depuis le vol 5 |
+| Banc de vols automatique | fait | 340 vols, protocole identique depuis le vol 5 |
 | Détection, IMU simulée idéale | fait | test sur 60 vols neufs : jusqu'à 41 pannes sur 42, aucune fausse alarme |
 | Détection en vol (temps réel) | fait | mêmes alarmes en vol qu'après coup, 0 écart sur 60 vols rejoués |
 | Récupération des pannes GPS (R3) | fait, 3 versions | GPS sain repris 6 fois sur 7 ; échoue encore sur un leurre lent |
 | Réalisme : bruit et vibration de l'IMU | fait | la vibration dégrade fortement détection et navigation à l'estime |
 | Flux optique sous vibration | fait | R3 reprend le GPS sain 9 fois sur 9 |
 | Autoencodeur, détecteurs recalibrés sous vibration | fait | 21 pannes sur 32 sans fausse alarme ; petites pannes d'IMU manquées par tous |
-| Comprendre pourquoi les petites pannes d'IMU deviennent invisibles | **en cours** | |
-| Classification du type de panne | à faire | |
+| Comprendre pourquoi les petites pannes d'IMU deviennent invisibles | fait | la vibration (gyroscopes comme accéléromètres) noie la panne dans le bruit ; l'EKF ne s'en protège pas |
+| Classification du type de panne | **en cours** | |
 | R3 guidé par le type de panne plutôt que par une règle | à faire | |
 
 ## Résultats principaux
@@ -168,6 +168,16 @@ d'accéléromètre de 0,3 et 0,5 m/s², les dérives, ni le biais de gyroscope d
 que ces pannes étaient presque toutes détectées sans vibration. Le seuil de l'autoencodeur dépend
 aussi du tirage initial du réseau (de 0,68 à 1,59 sur 5 graines).
 
+**Pourquoi ces pannes deviennent invisibles** (vols 329 à 340, même biais de 0,3 m/s² et même
+vent, en ne faisant vibrer que les gyroscopes ou que les accéléromètres) : chacune des deux
+vibrations suffit seule à ajouter à l'innovation de vitesse un bruit plus fort que l'effet de la
+panne. Celle des gyroscopes passe surtout par une erreur d'attitude (0,55 à 0,62° contre 0,12 à
+0,15° sans vibration), celle des accéléromètres entre directement dans la vitesse prédite. L'EKF
+ne s'en protège pas : son mécanisme anti-vibration ne se déclenche pas, son incertitude reste la
+même et il s'attribue environ 0,45° d'erreur d'attitude quelle que soit l'erreur vraie. Le flux
+optique n'y est pour rien. Deux vols par configuration ; détail dans
+[`docs/demarche.md`](docs/demarche.md).
+
 ## Limites
 
 - Tout est simulé. Le modèle de vibration du simulateur (une oscillation par moteur) et le flux
@@ -181,14 +191,13 @@ aussi du tirage initial du réseau (de 0,68 à 1,59 sur 5 graines).
 
 ## Prochaines étapes
 
-1. **Comprendre pourquoi les petites pannes d'IMU deviennent invisibles sous vibration** (en
-   cours) : l'agitation normale couvre-t-elle l'effet de la panne, l'EKF élargit-il lui-même son
-   incertitude, ou le flux optique absorbe-t-il l'erreur ?
-2. **Classifier le type de panne**, à partir des signatures enregistrées sur les vols avec panne.
-3. **Guider R3 par ce type de panne** plutôt que par une règle fixe : distinguer un leurre d'une
+1. **Classifier le type de panne** (en cours), à partir des signatures enregistrées sur les
+   vols avec panne.
+2. **Guider R3 par ce type de panne** plutôt que par une règle fixe : distinguer un leurre d'une
    dérive d'accéléromètre avant d'écarter le GPS, et juger le GPS pendant l'exclusion autrement
    qu'en le comparant à une estimée qui dérive.
-4. Ensuite : fixer le seuil de l'autoencodeur sur davantage de vols ; pannes sur un seul capteur
+3. Ensuite : détecter les petites pannes d'IMU sous vibration en intégrant leur effet dans le
+   temps ; fixer le seuil de l'autoencodeur sur davantage de vols ; pannes sur un seul capteur
    (comparaison entre capteurs redondants) ; vérifier le réalisme de la dérive à l'estime sous
    vibration ; comprendre l'exclusion à tort du vol 267 ; traiter la phase qui suit le retrait
    d'une panne.

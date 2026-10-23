@@ -1,7 +1,7 @@
 #!/bin/bash
 # Lance un vol SITL automatique : démarre le SITL, exécute vol_auto.py, arrête le SITL.
 # Usage : scripts/lancer_vol.sh <scénario> [vitesse direction turbulence] [--injection T] [--amplitude A]
-#         [--detecteur] [--trainee] [--bascule T] [--reponse R] [--bruit R] [--vibration] [--flux_optique]
+#         [--detecteur] [--trainee] [--bascule T] [--reponse R] [--bruit R] [--vibration [gyro|acc]] [--flux_optique]
 # Scénarios : nominal, gps60, gps30, biais10, biais05, magneto, jam, et avec --amplitude : biais,
 # derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
 # Vent optionnel : vitesse (m/s), direction d'où il vient (degrés), turbulence (m/s).

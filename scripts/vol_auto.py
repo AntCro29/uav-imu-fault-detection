@@ -2,7 +2,7 @@
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
-                           [--reponse rien|natif|natif_trainee|r3] [--bruit R] [--vibration]
+                           [--reponse rien|natif|natif_trainee|r3] [--bruit R] [--vibration [gyro|acc]]
                            [--flux_optique] [--flux_permanent]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
@@ -60,7 +60,9 @@ R = 30 ou 60 est bien plus fort que le bruit d'une vraie IMU (README).
 « valeurs réelles d'un quad de 180 mm » du test MotorVibration d'ArduPilot
 (Tools/autotest/arducopter.py:5644-5658), appliquées aux trois IMU : VIBRATION. Avec une
 vibration, SIM_GYR*_RND et SIM_ACC*_RND deviennent l'amplitude de sinusoïdes aux fréquences des
-moteurs au lieu d'un bruit blanc (AP_InertialSensor_SITL.cpp:245-279).
+moteurs au lieu d'un bruit blanc (AP_InertialSensor_SITL.cpp:245-279). « --vibration gyro » ou
+« --vibration acc » ne fait vibrer que les gyroscopes ou que les accéléromètres (amplitude de
+l'autre capteur mise à 0, ce qui supprime sa vibration : l. 152 et 268).
 --flux_optique : capteur de flux optique et télémètre simulés (scripts/flux_optique.parm, chargé
 au démarrage du SITL par lancer_vol.sh, car FLOW_TYPE et RNGFND1_TYPE ne sont lus qu'au
 démarrage) ; vol_auto.py vérifie seulement qu'ils sont configurés. L'EKF ne s'en sert pas tant
@@ -154,7 +156,8 @@ arguments.add_argument("--bascule", type=float, help="instant (s de cercle) de l
 arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3"], default="rien",
                        help="réponse à la panne")
 arguments.add_argument("--bruit", type=float, help="bruit de gyroscope pendant tout le vol (SIM_GYR*_RND)")
-arguments.add_argument("--vibration", action="store_true", help="vibration des moteurs pendant tout le vol")
+arguments.add_argument("--vibration", nargs="?", const="toutes", choices=["toutes", "gyro", "acc"],
+                       help="vibration des moteurs pendant tout le vol (gyro ou acc : un seul type de capteur)")
 arguments.add_argument("--flux_optique", action="store_true",
                        help="vérifie le flux optique et le télémètre chargés par lancer_vol.sh")
 arguments.add_argument("--flux_permanent", action="store_true",
@@ -438,7 +441,8 @@ if vent is not None:
 if args.bruit is not None:
     regler({nom: args.bruit for nom in SCENARIOS["bruit_gyro"]["params"]})
 if args.vibration:
-    regler(VIBRATION)
+    regler({nom: (0 if (args.vibration == "gyro" and "_ACC" in nom) or (args.vibration == "acc" and "_GYR" in nom)
+                  else valeur) for nom, valeur in VIBRATION.items()})
 
 # Paramètres
 regler({"FS_EKF_ACTION": 1 if args.reponse in ("natif", "natif_trainee") else 0})
