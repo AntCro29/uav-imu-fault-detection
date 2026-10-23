@@ -1,11 +1,17 @@
 """Erreur de navigation réelle et tenue du cercle d'un vol : vérité du simulateur contre estimation.
 
-Usage : python scripts/erreur_navigation.py <log.BIN> [image.png [titre]]
+Usage : python scripts/erreur_navigation.py [--coeur0] <log.BIN> [image.png [titre]]
 Position vraie : SIM.Lat/Lng (simulateur, 10 Hz), ramenée en mètres nord/est depuis l'origine de
-l'EKF (ORGN) avec LATLON_TO_M d'ArduPilot. Position estimée : XKF1.PN/PE du cœur 0 (même origine,
-10 Hz, le cœur que lisent les détecteurs ; identique à POS à 1 cm près au log 37 quand les deux
-existent). POS n'est pas utilisé : il n'est presque plus enregistré quand l'EKF perd la position
-(1,2 message/s pendant la coupure GPS du log 37). t = 0 à l'entrée en CIRCLE.
+l'EKF (ORGN) avec LATLON_TO_M d'ArduPilot. Position estimée : XKF1.PN/PE du cœur EKF principal,
+celui sur lequel le drone pilote (même origine, 10 Hz ; cœur 0 au départ, puis celui qu'annoncent
+les messages « EKF3 primary changed:N »). Jusqu'au 2026-10-22, le script lisait toujours le cœur 0
+(option --coeur0 pour retrouver ce calcul) : sous vibration, les deux cœurs divergent et l'erreur
+du cœur 0 surestimait celle du drone quand il pilotait sur le cœur 1. Après « EKF3 IMUn stopped
+aiding » du cœur principal (et jusqu'à son « IMUn is using GPS »), XKF1 contient la position GPS
+brute signalée invalide (AP_NavEKF3_Outputs.cpp:234-242) : l'estimée est alors comptée invalide
+(NaN, exclue des erreurs ; part du temps affichée). POS n'est pas utilisé : il n'est presque plus
+enregistré quand l'EKF perd la position (1,2 message/s pendant la coupure GPS du log 37).
+t = 0 à l'entrée en CIRCLE.
 Perturbation : du premier au dernier vrai changement de SIM_GPS1_ENABLE, SIM_GPS1_JAM,
 SIM_GPS1_GLTCH_X ou SIM_ACC1_BIAS_X (PARM ; le biais d'accéléromètre sert de vol témoin) ; à défaut (vol --bascule), de la bascule sur le jeu de sources 2 au retour
 au jeu 1 (EV 86 / 85). Les bascules sont aussi listées (décisions de R3).
@@ -34,9 +40,48 @@ CERCLE_APRES = 90
 DEBUT_CENTRE = 10.0
 
 
-def lire(chemin):
+def dernier(evenements, t, defaut):
+    """Valeur du dernier événement (t_i, valeur) antérieur ou égal à t (événements triés)."""
+    valeur = defaut
+    for ti, v in evenements:
+        if ti > t:
+            break
+        valeur = v
+    return valeur
+
+
+def coeur_principal(textes):
+    """Changements de cœur principal et validité de chaque cœur, lus dans les messages (t, texte)."""
+    principal, invalide = [], {0: [], 1: []}
+    for t, texte in textes:
+        if "primary changed:" in texte:
+            principal.append((t, int(texte.split(":")[-1])))
+        for c in invalide:
+            if f"IMU{c} stopped aiding" in texte:
+                invalide[c].append((t, True))
+            elif f"IMU{c} is using GPS" in texte:
+                invalide[c].append((t, False))
+    return principal, invalide
+
+
+def position_principale(coeurs, textes):
+    """Série (t, PN, PE) du cœur principal à chaque instant, NaN quand ce cœur ne navigue plus."""
+    principal, invalide = coeur_principal(textes)
+    serie = []
+    for c, points in coeurs.items():
+        for t, pn, pe in points:
+            if dernier(principal, t, 0) != c:
+                continue
+            if dernier(invalide[c], t, False):
+                pn = pe = float("nan")
+            serie.append((t, pn, pe))
+    return sorted(serie)
+
+
+def lire(chemin, coeur0=False):
     mlog = mavutil.mavlink_connection(chemin)
-    sim, pos, vent, textes, debut_fin, bascules, modes = [], [], [], [], [], [], []
+    sim, vent, textes, debut_fin, bascules, modes = [], [], [], [], [], []
+    coeurs = {0: [], 1: []}
     origine = t_cercle = t_rtl = None
     depart, derniere, reglages = {}, {}, {}
     while True:
@@ -49,8 +94,8 @@ def lire(chemin):
             origine = (msg.Lat, msg.Lng)
         elif genre == "SIM":
             sim.append((t, msg.Lat, msg.Lng, msg.Alt))
-        elif genre == "XKF1" and msg.C == 0:
-            pos.append((t, msg.PN, msg.PE))
+        elif genre == "XKF1" and msg.C in coeurs:
+            coeurs[msg.C].append((t, msg.PN, msg.PE))
         elif genre == "XKF2" and msg.C == 0:
             vent.append((t, msg.VWN, msg.VWE))
         elif genre == "MODE":
@@ -74,6 +119,7 @@ def lire(chemin):
             textes.append((t, msg.Message))
     if not debut_fin:
         debut_fin = bascules
+    pos = coeurs[0] if coeur0 else position_principale(coeurs, textes)
     return origine, sim, pos, vent, textes, debut_fin, bascules, modes, t_cercle, t_rtl, reglages
 
 
@@ -83,8 +129,8 @@ def en_metres(lat, lng, origine):
     return n, e
 
 
-def analyser(chemin):
-    origine, sim, pos, vent, textes, debut_fin, bascules, modes, t_cercle, t_rtl, reglages = lire(chemin)
+def analyser(chemin, coeur0=False):
+    origine, sim, pos, vent, textes, debut_fin, bascules, modes, t_cercle, t_rtl, reglages = lire(chemin, coeur0)
     if origine is None or t_cercle is None:
         sys.exit("Log sans origine EKF ou sans entrée en CIRCLE")
     vrai = pd.DataFrame(sim, columns=["t", "lat", "lng", "alt"])
@@ -110,6 +156,7 @@ def analyser(chemin):
     df["dist_centre"] = np.hypot(df.n - centre[0], df.e - centre[1])
 
     print(f"{chemin}")
+    print("Estimée : " + ("cœur 0 (ancien calcul)" if coeur0 else "cœur EKF principal"))
     if reglages:
         print(f"Vent réglé : {reglages.get('SIM_WIND_SPD', 0):g} m/s venant de {reglages.get('SIM_WIND_DIR', 0):g}°")
     v = pd.DataFrame(vent, columns=["t", "VWN", "VWE"])
@@ -128,14 +175,17 @@ def analyser(chemin):
     if t_pert:
         phases += [("pendant", t_pert[0], t_pert[1]), ("après", t_pert[1], fin)]
     print(f"\n{'phase':<8} {'durée':>7} {'erreur nav. max':>16} {'à la fin':>9} {'dist. centre max':>17} "
-          f"{'dans la zone':>13} {'en mission':>11}")
+          f"{'dans la zone':>13} {'en mission':>11} {'estimée invalide':>17}")
     for nom, a, b in phases:
         p = df[(df.tc >= a) & (df.tc < b)]
         if p.empty:
             continue
-        print(f"{nom:<8} {b - a:>6.0f}s {p.erreur.max():>15.1f}m {p.erreur.iloc[-1]:>8.1f}m "
+        valides = p.erreur.dropna()
+        maxi = f"{valides.max():>15.1f}m" if len(valides) else f"{'—':>16}"
+        fin_phase = f"{p.erreur.iloc[-1]:>8.1f}m" if not np.isnan(p.erreur.iloc[-1]) else f"{'—':>9}"
+        print(f"{nom:<8} {b - a:>6.0f}s {maxi} {fin_phase} "
               f"{p.dist_centre.max():>16.1f}m {np.mean(p.dist_centre < ZONE_M) * 100:>12.0f}% "
-              f"{np.mean(p['mode'] == MODE_CIRCLE) * 100:>10.0f}%")
+              f"{np.mean(p['mode'] == MODE_CIRCLE) * 100:>10.0f}% {np.mean(p.erreur.isna()) * 100:>16.0f}%")
     changements = [(t - t_cercle, NOMS_MODES.get(md, md)) for t, md in modes if 0 < t - t_cercle <= fin]
     print("Changements de mode pendant la mission : "
           + (", ".join(f"{nm} à {t:.1f} s" for t, nm in changements) if changements else "aucun"))
@@ -144,7 +194,7 @@ def analyser(chemin):
                                                for t, b in bascules if t > t_cercle))
     print("Messages pendant le cercle :")
     for t, texte in textes:
-        if 0 <= t - t_cercle <= fin and any(k in texte for k in ("EKF", "lane", "aiding", "Failsafe", "GPS")):
+        if 0 <= t - t_cercle <= fin and any(k in texte for k in ("EKF", "lane", "aiding", "Failsafe", "GPS", "primary")):
             print(f"  {t - t_cercle:7.1f} s  {texte}")
     return df, centre, t_pert
 
@@ -180,8 +230,9 @@ def tracer(df, centre, t_pert, sortie, titre):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (2, 3, 4):
+    arguments = [a for a in sys.argv[1:] if a != "--coeur0"]
+    if len(arguments) not in (1, 2, 3):
         sys.exit(__doc__)
-    df, centre, t_pert = analyser(sys.argv[1])
-    if len(sys.argv) >= 3:
-        tracer(df, centre, t_pert, sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else sys.argv[1].split("/")[-1])
+    df, centre, t_pert = analyser(arguments[0], "--coeur0" in sys.argv)
+    if len(arguments) >= 2:
+        tracer(df, centre, t_pert, arguments[1], arguments[2] if len(arguments) == 3 else arguments[0].split("/")[-1])

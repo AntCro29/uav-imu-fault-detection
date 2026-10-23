@@ -21,10 +21,11 @@ vents sur trois et a écarté le GPS à tort sur une dérive d'accéléromètre.
 été obtenus avec une IMU simulée sans bruit ni vibration. Avec la vibration des moteurs que les
 tests d'ArduPilot reprennent d'un quadricoptère de 180 mm (6 à 12 m/s², un niveau jugé acceptable),
 les détecteurs calibrés sans vibration font de nombreuses fausses alarmes ou manquent les biais de
-0,3 m/s², la navigation à l'estime dérive de 131 à 304 m en 60 s au lieu de 6 à 45 m, et R3 ne
+0,3 m/s², l'erreur de la navigation à l'estime atteint 107 à 186 m pendant une coupure de 60 s au
+lieu de 8 à 47 m, et R3 ne
 reprend le GPS sain qu'une fois sur six : deux drones finissent à plus de 2 km du départ. Un capteur de flux optique simulé, fusionné en
 permanence, corrige ce dernier point : avec la même vibration, R3 reprend le GPS sain dans 9 cas
-sur 9 et l'erreur de position reste sous 16 m pendant la panne (contre 113 à 319 m). Les
+sur 9 et l'erreur de position reste sous 16 m pendant la panne (contre 15 à 319 m). Les
 détecteurs restent à recalibrer sur un nominal avec vibration. La classification
 du type de panne n'est pas encore abordée.
 
@@ -377,8 +378,8 @@ première partie vérifie les moyens que donne ArduPilot pour naviguer sans GPS,
   commande MAVLink `MAV_CMD_SET_EKF_SOURCE_SET` fait passer de l'un à l'autre en vol. Un jeu
   sans GPS permettrait d'écarter un GPS leurré, qui se dit sain.
 
-Erreur de navigation réelle (position du simulateur contre position estimée par l'EKF, cœur 0,
-`scripts/erreur_navigation.py`), sous un vent de 6 m/s venant du nord :
+Erreur de navigation réelle (position du simulateur contre position estimée par le cœur EKF
+principal, `scripts/erreur_navigation.py`), sous un vent de 6 m/s venant du nord :
 
 | Vol | Situation | Vent estimé | Erreur de navigation max | Temps dans la zone surveillée (< 60 m du centre) |
 |---|---|---|---|---|
@@ -386,7 +387,7 @@ Erreur de navigation réelle (position du simulateur contre position estimée pa
 | 129 | nominal, avec traînée | 5,84 m/s venant de 359° | 0,3 m | 100 % |
 | 23 | coupure GPS de 60 s, sans traînée | non estimé | **232 m** | **40 %** de la coupure (jusqu'à 266 m du centre) |
 | 130 | coupure GPS de 60 s, avec traînée | 5,85 m/s venant de 359° | **7,6 m** | **100 %** |
-| 131 | GPS écarté par l'EKF pendant 60 s, avec traînée | 5,86 m/s venant de 359° | 17 m | 100 % |
+| 131 | GPS écarté par l'EKF pendant 60 s, avec traînée | 5,86 m/s venant de 359° | 14 m | 100 % |
 
 ![Vol 23 : coupure GPS sans estimation du vent](docs/figures/coupure_gps_sans_trainee_vol23.png)
 ![Vol 130 : même coupure, vent estimé par la traînée](docs/figures/coupure_gps_avec_trainee_vol130.png)
@@ -396,12 +397,11 @@ avec prudence : la traînée évite le passage en « stopped aiding », mais la 
 coupure vient de l'IMU simulée, sans bruit ni vibration dans nos vols. Sur un vrai drone,
 l'intégration inertielle pure dériverait beaucoup plus vite (non mesuré ici). Elle varie aussi
 d'un vol à l'autre : sur la campagne suivante (R3 v2, pas encore décrite ici), sous un vent venant
-de l'est, l'erreur a atteint 50 m après 60 s sans GPS. Le détecteur ne fait
+de l'est, l'erreur a atteint 34 m après 60 s sans GPS. Le détecteur ne fait
 aucune fausse alarme sur le vol nominal avec traînée (innovations maximales identiques à celles
 du vol 16). Limites : un vol par cas, un seul vent, constant pendant la coupure (le test
 d'ArduPilot signale qu'un vent qui change pendant la navigation à l'estime est le cas
-difficile) ; au vol 131, ArduPilot change de cœur EKF principal au bout de 41 s sans GPS, alors
-que l'erreur est mesurée sur le cœur 0. Une fois le GPS écarté, ses innovations ne sont plus mises
+difficile). Une fois le GPS écarté, ses innovations ne sont plus mises
 à jour : le détecteur ne peut plus dire quand le GPS redevient fiable, il faudra un autre critère.
 
 ### Récupération, partie B : brouillage et leurrage GPS (vols 132 à 149)
@@ -429,7 +429,7 @@ panne (zone surveillée : 60 m autour du centre du cercle).
 
 | Panne | R0 rien | R1 ArduPilot | R2 ArduPilot + traînée | R3 |
 |---|---|---|---|---|
-| Brouillage (vols 133 à 136) | erreur 2 657 m, 51 % dans la zone | atterrissage à 124,9 s, posé à ≈ 180 m | atterrissage à 124,9 s | **erreur 14 m, 100 %, mission poursuivie** |
+| Brouillage (vols 133 à 136) | erreur 2 657 m, 51 % dans la zone | atterrissage à 124,9 s, posé à ≈ 180 m | atterrissage à 124,9 s | **erreur 9 m, 100 %, mission poursuivie** |
 | Leurre en échelon (137 à 140) | 100 m, 34 % | 100 m, 33 %, aucun failsafe | retour au départ à 130 s, vers une position faussée | **5,3 m, 100 %** |
 | Leurre en rampe (141 à 144) | 98,5 m, 57 % | identique | identique, retour au départ à 190 s | **98,5 m, 57 % : échec** |
 | Témoin : biais d'accéléromètre 0,5 m/s² (145 à 148) | 0,5 m, 100 % | identique | identique | identique, **GPS non écarté** |
@@ -487,8 +487,8 @@ limite de 0,8 m/s, pour mesurer cette limite), brouillage ; cinq vols témoins a
 
 | Panne | R0 rien | R3 v2 |
 |---|---|---|
-| Leurre en échelon (vols 150 à 155) | erreur 100 m, 30 à 41 % dans la zone pendant la panne | vent 180° : **16 m pendant la panne, 24 m après, 100 %**, retour au GPS ; vents 90° et 270° : 50 m et 10 m pendant la panne, puis **échec** (244 m et 58 m) |
-| Leurre en rampe jusqu'à 100 m (156 à 161) | 98 m, 57 à 69 % | vent 270° : **26 m pendant, 42 m après, 100 %**, retour au GPS ; vents 90° et 180° : **échec** (196 m et 82 m après la panne) |
+| Leurre en échelon (vols 150 à 155) | erreur 100 m, 30 à 41 % dans la zone pendant la panne | vent 180° : **17 m pendant la panne, 26 m après, 100 %**, retour au GPS ; vents 90° et 270° : 34 m et 10 m pendant la panne, puis **échec** (211 m et 58 m) |
+| Leurre en rampe jusqu'à 100 m (156 à 161) | 98 m, 57 à 69 % | vent 270° : **16 m pendant, 21 m après, 100 %**, retour au GPS ; vents 90° et 180° : **échec** (196 m et 152 m après la panne) |
 | Leurre en rampe jusqu'à 30 m (162 à 165) | 29,5 m, 94 à 100 % | 29,5 m : retour au GPS leurré pendant la panne, **aucun gain** (limite attendue) |
 | Brouillage (166 à 171) | **1 500 à 2 300 m**, 0 % dans la zone après la panne | **9 à 28 m pendant la panne, 100 %** ; puis **échec** dans les trois cas (26 à 114 m après) |
 | Témoins (172 à 176) et nominaux (177 à 179) | | **GPS jamais écarté**, erreur ≤ 0,6 m |
@@ -544,7 +544,7 @@ valider sur les vols qui ont servi au réglage.
 
 | Panne | R0 rien | R3 v3 |
 |---|---|---|
-| Leurre en échelon (vols 180 à 185) | erreur 100 m, 31 à 42 % dans la zone pendant la panne | **retour au GPS sain dans les trois cas**, 30 s après la fin du leurre ; erreur max 50, 21 et 27 m, 97 à 100 % dans la zone |
+| Leurre en échelon (vols 180 à 185) | erreur 100 m, 31 à 42 % dans la zone pendant la panne | **retour au GPS sain dans les trois cas**, 30 s après la fin du leurre ; erreur max 33, 21 et 37 m, 97 à 100 % dans la zone |
 | Leurre en rampe jusqu'à 100 m (186 à 191) | 98 m, 52 à 69 % | vent 225° : leurre refusé, **17 m pendant, 38 m après**, retour au GPS sain ; vents 45° et 135° : **GPS leurré repris** 30 s après l'exclusion, 98 m comme sans réponse |
 | Leurre en rampe jusqu'à 30 m (192 à 195) | 29,5 m | 29,5 m : GPS leurré repris, **aucun gain** (limite attendue) |
 | Brouillage (196 à 201) | **1 170 à 2 470 m**, 0 % dans la zone après la panne | vents 135° et 225° : **16 et 18 m pendant, 22 et 41 m après, 100 %**, retour au GPS ; vent 45° : **dernier recours**, RTL accepté, posé à 472 m du départ |
@@ -704,17 +704,19 @@ vibration.
 **Navigation à l'estime** (coupure GPS de 60 s avec traînée, erreur vraie en mètres, un vol par
 vent) :
 
-| Vibration | +10 s | +30 s | +60 s | Temps dans la zone pendant la coupure |
-|---|---|---|---|---|
-| Sans (vols 229 à 231) | 1 à 2 | 3 à 12 | 6 à 45 | 90 à 100 % |
-| Avec (vols 234, 237, 240) | 7 à 18 | 48 à 104 | 131 à 253 | 44 à 58 % |
-| Avec, vol pilote 232 | 17 | 124 | 304 | 25 % |
+| Vibration | +10 s | +30 s | +60 s | Maximum pendant la coupure | Temps dans la zone pendant la coupure |
+|---|---|---|---|---|---|
+| Sans (vols 229 à 231) | 1 à 2 | 3 à 12 | 6 à 45 | 8 à 47 | 90 à 100 % |
+| Avec (vols 234, 237, 240) | 7 à 18 | 48 à 104 | 81 à 112 | 107 à 160 | 44 à 58 % |
+| Avec, vol pilote 232 | 17 | 124 | 61 | 186 | 25 % |
 
 Avec vibration, ArduPilot signale « EKF variance: position lost » et bascule sur le deuxième cœur
-environ 41 s après la coupure, mais aucun cœur n'arrête de naviguer. La vibration de
+environ 41 s après la coupure, mais aucun cœur n'arrête de naviguer. Le deuxième cœur a moins
+dérivé : l'erreur de l'estimée sur laquelle pilote le drone retombe alors (décrochage de la
+figure), et son maximum est atteint juste avant la bascule. La vibration de
 l'accéléromètre, que l'EKF intègre deux fois pour obtenir la position, est la cause probable de
 cette dérive (non vérifié). Elle est du même ordre que celle du bruit blanc de gyroscope le plus
-fort (145 à 211 m au bruit 60), alors que cette vibration est jugée acceptable.
+fort (145 à 211 m à +60 s au bruit 60), alors que cette vibration est jugée acceptable.
 
 ![Erreur de navigation à l'estime avec et sans vibration](docs/figures/vibration_derive_estime.png)
 
@@ -723,7 +725,7 @@ vraie du simulateur) :
 
 | Vol | Panne, vent | Exclusion du GPS | Suite | Pendant la panne : erreur à la fin, distance max au centre, temps dans la zone | Fin du vol (distance au départ) |
 |---|---|---|---|---|---|
-| 248 | leurre, 20° | +0,7 s (SP en premier) | GPS repris 30 s après le retrait (écart 43,5 m, tolérance 78,8 m) | 113 m, 56 m, 100 % | posé à 5 m |
+| 248 | leurre, 20° | +0,7 s (SP en premier) | GPS repris 30 s après le retrait (écart 43,5 m, tolérance 78,8 m) | 15 m, 56 m, 100 % | posé à 5 m |
 | 250 | leurre, 140° | +0,7 s (SP en premier) | dernier recours : RTL refusé faute de position, LAND | 319 m, 292 m, 46 % | posé à 341 m |
 | 252 | leurre, 260° | +0,6 s (SP en premier) | dernier recours RTL | 153 m, 129 m, 59 % | posé à 157 m |
 | 249 | brouillage, 20° | +0,6 s (fix perdu) | dernier recours RTL | 114 m, 143 m, 36 % | **coupé en l'air à 134 m de haut, à 2 030 m** (*) |
@@ -753,16 +755,25 @@ valeurs ne valent rien après ce message (vol 250 après 204 s de cercle, vol 25
 erreurs pendant la panne du tableau ci-dessus sont antérieures à ces messages. Le pilote, lui,
 respecte l'invalidité et garde la dernière position valide (`AP_AHRS.h:278`,
 `AP_InertialNav.cpp:18-21`). Pourquoi le drone du vol 250 revient alors vers le cercle n'est pas
-expliqué.
+expliqué. `erreur_navigation.py` compte désormais l'estimée comme invalide après ce message.
+
+**Correction de méthode (2026-10-22)** : jusqu'ici, `erreur_navigation.py` mesurait toujours
+l'estimée du cœur EKF 0, alors que le drone pilote sur le cœur principal, qui peut changer en vol
+(« EKF3 primary changed »). Sans vibration, les deux cœurs restent proches ; sous vibration, ils
+divergent. Le script suit maintenant le cœur principal (`--coeur0` redonne l'ancien calcul), et
+les chiffres de ce README ont été recalculés : sur les vols 129 à 269, l'erreur change de plus de
+1 m sur 26 vols sur 141, surtout sous vibration (coupures GPS : 131 à 304 m à +60 s avec le
+cœur 0, 61 à 112 m avec le cœur principal ; vol 248 : 113 m contre 15 m), parfois à la hausse
+(R3 v2, vol 159 : 82 m contre 152 m après la panne). Les conclusions qualitatives ne changent pas.
 
 Limites : un vol par case, un seul vent et un seul niveau de vibration ; le modèle de vibration du
 simulateur (une sinusoïde par moteur) n'a pas été comparé à des logs de vrais drones, et une
-dérive de 130 à 300 m en 60 s pour une vibration jugée acceptable reste à confirmer (un effet
+erreur de 107 à 186 m en 60 s pour une vibration jugée acceptable reste à confirmer (un effet
 propre au simulateur n'est pas exclu).
 
 ### Flux optique : naviguer sans GPS sous vibration (vols 254 à 267)
 
-Sous vibration, la navigation à l'estime dérive de 131 à 304 m en 60 s, et R3 ne reprend presque
+Sous vibration, l'erreur de la navigation à l'estime atteint 107 à 186 m en 60 s, et R3 ne reprend presque
 jamais le GPS. Un capteur de flux optique (caméra orientée vers le sol) associé à un télémètre
 mesure la vitesse par rapport au sol : il borne cette dérive sans dépendre du GPS.
 
@@ -781,7 +792,7 @@ fusionnée, car l'EKF ne la fusionne que si la source de position est le GPS
 **Vols pilotes** (vent 6 m/s venant de 20°, turbulence 2) : la vitesse mesurée par le flux suit
 celle du GPS (corrélation 0,95 sans vibration et 0,96 avec, vols 254 et 255, flux non fusionné).
 Coupure GPS de 60 s avec traînée et vibration (vol 257, flux fusionné en permanence) : erreur de
-position vraie de 1 / 4 / 9 m à +10 / 30 / 60 s, contre 18 / 104 / 131 m sans flux (vol 234), et
+position vraie de 1 / 4 / 9 m à +10 / 30 / 60 s, contre 18 / 104 / 81 m sans flux (vol 234), et
 100 % du temps dans la zone. Prix à payer : en nominal sous le même vent, le maximum de
 l'innovation de vitesse SV passe de 0,31 sans flux (vol 233) à 0,51 et 0,39 avec flux (vols 256 et
 258), SP et SM restant du même ordre : le nominal s'écarte encore plus de celui sur lequel les
@@ -795,7 +806,7 @@ d'injection que les vols 248 à 253 ; R3 inchangé) :
 | Pannes | leurre de 100 m en échelon, brouillage | leurre en échelon, leurre en rampe jusqu'à 100 m, brouillage |
 | GPS écarté correctement | 6 / 6 | 9 / 9 (+0,5 à +0,7 s) |
 | GPS sain repris | 1 / 6 | **9 / 9**, 30 s après le retrait (écart 4 à 17 m, tolérance 78,8 m) |
-| Erreur de position à la fin de la panne | 113 à 319 m | **4 à 15 m** (maximum 6 à 16 m) |
+| Erreur de position à la fin de la panne | 15 à 319 m | **4 à 15 m** (maximum 6 à 15 m) |
 | Temps dans la zone pendant la panne | 36 à 100 % | **100 %** |
 | Dernier recours | 5 / 6 | 0 / 9 |
 
@@ -859,8 +870,9 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/comparer_en_ligne.py <trace.csv> <dossier_jeu_donnees> <log>` : compare la trace d'un
   vol fait avec `--detecteur` à l'analyse du log du même vol (débit, décalage d'horloge, valeurs,
   délais et fausses alarmes).
-- `scripts/erreur_navigation.py <log.BIN> [image.png [titre]]` : erreur de navigation réelle
-  (position du simulateur contre position estimée, cœur 0), distance au centre du cercle, temps
+- `scripts/erreur_navigation.py [--coeur0] <log.BIN> [image.png [titre]]` : erreur de navigation
+  réelle (position du simulateur contre position estimée par le cœur EKF principal, invalide après
+  un « stopped aiding » ; `--coeur0` : ancien calcul sur le cœur 0), distance au centre du cercle, temps
   passé dans la zone surveillée et vent estimé, avant, pendant et après une perturbation GPS ;
   figure de la trajectoire vue de dessus et des erreurs. Résultats :
   `docs/figures/coupure_gps_sans_trainee_vol23.png` et `coupure_gps_avec_trainee_vol130.png`.
@@ -893,6 +905,12 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/lancer_vol.sh <scénario>` et `scripts/vol_auto.py` : vol SITL automatique
   (voir « Relancer un vol »). `scripts/flux_optique.parm` : paramètres du flux optique et du
   télémètre simulés, chargés au démarrage par `lancer_vol.sh --flux_optique`.
+- `scripts/animer_leurre.py <log_sans.BIN> <log_avec.BIN> <sortie.mp4> [t_debut t_fin]` : vidéo de
+  démonstration de deux vols face au même leurre (vue de dessus : position vraie, GPS, estimée du
+  cœur principal ; erreur de l'estimée), accélérée ×4 (ffmpeg nécessaire).
+- `scripts/animer_qgc.py <log.BIN> <enregistrement.mov> <décalage_s> <sortie.mp4> [t_debut t_fin]` :
+  enregistrement d'écran de QGroundControl (connecté au SITL en TCP sur le port 5762) à côté de la
+  vérité du même vol, synchronisés sur un changement de mode visible dans QGC.
 - `docs/figures/` : figures issues des premiers vols.
 
 Les logs de vol (`.BIN`, `.tlog`) ne sont pas versionnés.
@@ -1033,15 +1051,13 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
 - Récupération : juger le GPS pendant l'exclusion autrement que par un écart de position avec
   une estimée qui dérive ; distinguer un leurre d'une dérive d'accéléromètre avant d'écarter le
   GPS.
-- Vibration : vérifier si la dérive à l'estime de 130 à 300 m en 60 s est réaliste (logs de vrais
+- Vibration : vérifier si l'erreur à l'estime de 107 à 186 m en 60 s est réaliste (logs de vrais
   drones, modèle de vibration du simulateur) ; si oui, recalibrer les détecteurs sur des nominaux
   avec vibration et les tester sur des vols neufs, et revoir le critère de retour au GPS de R3 et
   son dernier recours (un RTL à l'estime peut finir à plusieurs kilomètres).
 - Flux optique : comprendre l'exclusion à tort du vol 267 ; recalibrer les détecteurs sur un
   nominal avec vibration et flux fusionné (l'innovation de vitesse y est plus haute) ; tester
   d'autres vents et des vols plus longs sans GPS.
-- Mesure de l'erreur de navigation : ne plus lire `XKF1` après un « stopped aiding » (il contient
-  alors le GPS brut).
 - Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.
 - Autoencodeur, dont l'erreur de reconstruction croît avec l'écart au nominal (pas de
   saturation du score comme l'Isolation Forest), comparé sur le même jeu de test.

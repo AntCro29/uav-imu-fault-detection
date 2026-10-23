@@ -539,7 +539,9 @@ if not pomper(900, lambda: not etat["arme"] or (etat["alt"] is not None and etat
 # Avec du vent, le drone posé peut rester armé : le régulateur demande encore de l'inclinaison
 # pour tenir la position, et le détecteur d'atterrissage d'ArduPilot ne conclut jamais
 # (drapeau ANGLE de LDET, vu au log 26). On désarme alors comme le ferait un pilote.
-debut_pose = alt_min = alt_max = None
+# Le critère est revérifié jusqu'au désarmement : au log 283, le drone a redécollé à 2,2 m entre
+# la demande normale (refusée) et le désarmement forcé, qui ne revérifiait pas.
+debut_pose = alt_min = alt_max = demande = None
 fin_attente = time.monotonic() + POSE_ATTENTE_MAX_S
 while etat["arme"]:
     if time.monotonic() > fin_attente:
@@ -557,19 +559,17 @@ while etat["arme"]:
         if debut_pose is not None:
             journal(f"Drone pas posé (altitude vraie {etat['alt_vraie'] - etat['alt_vraie_depart']:+.1f} m, "
                     f"vitesse verticale {etat['vd_vraie']:+.1f} m/s) : attente reprise")
-        debut_pose = None
+        debut_pose = demande = None
     elif debut_pose is None:
         debut_pose, alt_min, alt_max = time.monotonic(), etat["alt_vraie"], etat["alt_vraie"]
-    elif time.monotonic() - debut_pose >= POSE_DUREE_S:
-        break
-if etat["arme"]:
-    journal(f"Toujours armé, posé depuis {POSE_DUREE_S} s (état vrai du simulateur) : désarmement demandé")
-    m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0)
-    if not pomper(5, lambda: not etat["arme"]):
-        journal("Désarmement refusé : désarmement forcé (drone posé)")
+    elif demande is None and time.monotonic() - debut_pose >= POSE_DUREE_S:
+        journal(f"Toujours armé, posé depuis {POSE_DUREE_S} s (état vrai du simulateur) : désarmement demandé")
+        m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0)
+        demande = time.monotonic()
+    elif demande is not None and time.monotonic() - demande >= 5:
+        journal("Désarmement refusé, drone toujours posé : désarmement forcé")
         m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 21196, 0, 0, 0, 0, 0)
-        if not pomper(5, lambda: not etat["arme"]):
-            sys.exit("Désarmement impossible")
+        demande = time.monotonic()
 journal("DISARMED")
 pomper(5)
 journal("Vol terminé")
