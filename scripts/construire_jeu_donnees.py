@@ -5,7 +5,8 @@ Usage : python scripts/construire_jeu_donnees.py <dossier_sortie> <log1.BIN> [<l
 Colonnes :
   log, t_cercle_s (t = 0 à l'entrée en CIRCLE), phase (avant_cercle, cercle, rtl),
   SV, SP, SH, SM (innovations XKF4, cœur 0), gps_fix, gps_nsats (dernière valeur connue),
-  type_panne (aucune, acc, derive, gyr, bruit_gyr, bloque, gps, mag), amplitude, etiquette
+  type_panne (aucune, acc, derive, gyr, bruit_gyr, bloque, gps, mag, jam, leurre, leurre_rampe),
+  amplitude, etiquette
   (nominal, panne, apres_panne),
   t_depuis_injection_s, t_depuis_retrait_s.
 
@@ -19,7 +20,9 @@ et vide sur les lignes nominal). Amplitude : biais en m/s² pour acc ; valeur fi
 en m/s² pour derive (biais d'accéléromètre qui change plusieurs fois) ; rad/s pour gyr ; valeur
 de SIM_GYR*_RND (°/s, multipliée par les gaz) pour bruit_gyr ; valeur forcée en m/s² pour
 bloque ; décalage de SIM_MAG_OFS_X pour mag (+150 : le compas voit −150 mG sur son axe X) ;
-vide pour gps (coupure).
+vide pour gps (coupure) et jam (brouillage, SIM_GPS1_JAM) ; décalage vers le nord en m pour leurre
+(SIM_GPS1_GLTCH_X, en degrés dans le log, converti avec LATLON_TO_M comme dans vol_auto.py) et
+leurre_rampe (même paramètre qui prend plusieurs valeurs : valeur finale de la rampe).
 """
 import csv
 import os
@@ -31,7 +34,9 @@ TYPES = {"SIM_ACC1_BIAS_X": "acc", "SIM_ACC2_BIAS_X": "acc", "SIM_ACC3_BIAS_X": 
          "SIM_GPS1_ENABLE": "gps",
          "SIM_GYR1_BIAS_X": "gyr", "SIM_GYR2_BIAS_X": "gyr", "SIM_GYR3_BIAS_X": "gyr",
          "SIM_GYR1_RND": "bruit_gyr", "SIM_GYR2_RND": "bruit_gyr", "SIM_GYR3_RND": "bruit_gyr",
-         "SIM_ACCEL1_FAIL": "bloque", "SIM_ACCEL2_FAIL": "bloque", "SIM_ACCEL3_FAIL": "bloque"}
+         "SIM_ACCEL1_FAIL": "bloque", "SIM_ACCEL2_FAIL": "bloque", "SIM_ACCEL3_FAIL": "bloque",
+         "SIM_GPS1_JAM": "jam", "SIM_GPS1_GLTCH_X": "leurre"}
+M_PAR_DEGRE = 0.011131884502145034 * 1e7   # LATLON_TO_M d'ArduPilot, comme vol_auto.py
 MODE_CIRCLE, MODE_RTL = 7, 6
 COLONNES = ["log", "t_cercle_s", "phase", "SV", "SP", "SH", "SM", "gps_fix", "gps_nsats",
             "type_panne", "amplitude", "etiquette", "t_depuis_injection_s", "t_depuis_retrait_s"]
@@ -83,13 +88,15 @@ def decrire_panne(changements, valeurs_depart):
     # Dérive : le même paramètre prend plusieurs valeurs successives (rampe) ; l'amplitude est
     # alors la valeur la plus éloignée de la valeur saine, pas le premier pas
     valeurs_nom = [v for _, n, v, _ in injections if n == nom]
-    if type_panne == "acc" and len(set(valeurs_nom)) > 1:
-        type_panne = "derive"
+    if type_panne in ("acc", "leurre") and len(set(valeurs_nom)) > 1:
+        type_panne = "derive" if type_panne == "acc" else "leurre_rampe"
         valeur = max(valeurs_nom, key=lambda v: abs(v - valeurs_depart[nom]))
     if type_panne == "mag":
         amplitude = f"{valeur - valeurs_depart[nom]:+g}"
-    elif type_panne == "gps":
+    elif type_panne in ("gps", "jam"):
         amplitude = ""
+    elif type_panne in ("leurre", "leurre_rampe"):
+        amplitude = f"{(valeur - valeurs_depart[nom]) * M_PAR_DEGRE:.1f}"
     else:
         amplitude = f"{valeur:g}"
     t_injection = injections[0][0]
