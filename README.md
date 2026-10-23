@@ -22,11 +22,13 @@ vents sur trois et a écarté le GPS à tort sur une dérive d'accéléromètre.
 tests d'ArduPilot reprennent d'un quadricoptère de 180 mm (6 à 12 m/s², un niveau jugé acceptable),
 les détecteurs calibrés sans vibration font de nombreuses fausses alarmes ou manquent les biais de
 0,3 m/s², la navigation à l'estime dérive de 131 à 304 m en 60 s au lieu de 6 à 45 m, et R3 ne
-reprend le GPS sain qu'une fois sur six : deux drones se posent à plus de 2 km du départ. Les
-détecteurs et la récupération sont donc à revoir sur un nominal avec vibration. La classification
+reprend le GPS sain qu'une fois sur six : deux drones finissent à plus de 2 km du départ. Un capteur de flux optique simulé, fusionné en
+permanence, corrige ce dernier point : avec la même vibration, R3 reprend le GPS sain dans 9 cas
+sur 9 et l'erreur de position reste sous 16 m pendant la panne (contre 113 à 319 m). Les
+détecteurs restent à recalibrer sur un nominal avec vibration. La classification
 du type de panne n'est pas encore abordée.
 
-Deux cent cinquante-trois vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Deux cent soixante-sept vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -73,9 +75,11 @@ Deux cent cinquante-trois vols ont été réalisés en SITL (ArduCopter, vol en 
 | 233 à 241 | automatique | Vibration des moteurs pendant tout le vol, vent 6 m/s venant de 20°, 140° ou 260°, turbulence 2 : nominal, coupure GPS de 60 s avec traînée, biais de 0,3 m/s² |
 | 242 à 247 | automatique | Références sans vibration, mêmes vents : nominal, biais de 0,3 m/s² |
 | 248 à 253 | automatique | R3 v3 avec vibration, mêmes vents : leurre de 100 m en échelon, brouillage |
+| 254 à 258 | automatique | Vols pilotes du flux optique, vent 6 m/s venant de 20°, turbulence 2 : nominal avec flux non fusionné, sans puis avec vibration ; avec vibration et flux fusionné en permanence : nominal, coupure GPS de 60 s avec traînée, nominal (altitude corrigée) |
+| 259 à 267 | automatique | R3 v3 avec vibration et flux optique, vent 6 m/s venant de 20°, 140° ou 260°, turbulence 2 : leurre de 100 m en échelon, leurre en rampe jusqu'à 100 m, brouillage |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 253 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 267 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
@@ -714,23 +718,30 @@ fort (145 à 211 m au bruit 60), alors que cette vibration est jugée acceptable
 
 ![Erreur de navigation à l'estime avec et sans vibration](docs/figures/vibration_derive_estime.png)
 
-**R3 v3 avec vibration** (un vol par case ; distance au centre et pose mesurées sur la position
+**R3 v3 avec vibration** (un vol par case ; distance au centre et fin du vol mesurées sur la position
 vraie du simulateur) :
 
-| Vol | Panne, vent | Exclusion du GPS | Suite | Pendant la panne : erreur à la fin, distance max au centre, temps dans la zone | Posé à (du départ) |
+| Vol | Panne, vent | Exclusion du GPS | Suite | Pendant la panne : erreur à la fin, distance max au centre, temps dans la zone | Fin du vol (distance au départ) |
 |---|---|---|---|---|---|
-| 248 | leurre, 20° | +0,7 s (SP en premier) | GPS repris 30 s après le retrait (écart 43,5 m, tolérance 78,8 m) | 113 m, 56 m, 100 % | 5 m |
-| 250 | leurre, 140° | +0,7 s (SP en premier) | dernier recours : RTL refusé faute de position, LAND | 319 m, 292 m, 46 % | 341 m |
-| 252 | leurre, 260° | +0,6 s (SP en premier) | dernier recours RTL | 153 m, 129 m, 59 % | 157 m |
-| 249 | brouillage, 20° | +0,6 s (fix perdu) | dernier recours RTL | 114 m, 143 m, 36 % | **2 013 m** |
-| 251 | brouillage, 140° | +0,7 s (fix perdu) | dernier recours RTL | 116 m, 114 m, 68 % | 144 m (après être passé à 2,1 km, 18 min de vol) |
-| 253 | brouillage, 260° | +0,7 s (fix perdu) | dernier recours RTL | 231 m, 231 m, 52 % | **2 456 m** |
+| 248 | leurre, 20° | +0,7 s (SP en premier) | GPS repris 30 s après le retrait (écart 43,5 m, tolérance 78,8 m) | 113 m, 56 m, 100 % | posé à 5 m |
+| 250 | leurre, 140° | +0,7 s (SP en premier) | dernier recours : RTL refusé faute de position, LAND | 319 m, 292 m, 46 % | posé à 341 m |
+| 252 | leurre, 260° | +0,6 s (SP en premier) | dernier recours RTL | 153 m, 129 m, 59 % | posé à 157 m |
+| 249 | brouillage, 20° | +0,6 s (fix perdu) | dernier recours RTL | 114 m, 143 m, 36 % | **coupé en l'air à 134 m de haut, à 2 030 m** (*) |
+| 251 | brouillage, 140° | +0,7 s (fix perdu) | dernier recours RTL | 116 m, 114 m, 68 % | coupé en l'air à 15 m de haut, à 114 m (après être passé à 2,1 km, 18 min de vol) (*) |
+| 253 | brouillage, 260° | +0,7 s (fix perdu) | dernier recours RTL | 231 m, 231 m, 52 % | **coupé en l'air à 19 m de haut, à 2 437 m** (*) |
 
 L'exclusion reste correcte dans les six vols. Mais R3 ne reprend le GPS sain qu'une fois sur six
 (contre six sur sept sans vibration) : la dérive à l'estime dépasse vite sa tolérance de retour.
 Le dernier recours devient alors dangereux : le RTL vise le départ avec une position estimée fausse
 de plusieurs centaines de mètres (ArduPilot coupe aussi le SmartRTL, « bad position »), et deux
-drones se posent à plus de 2 km.
+drones finissent à plus de 2 km.
+
+(*) **Défaut du banc de test, corrigé depuis** : `vol_auto.py` jugeait le drone posé dès que
+l'altitude *estimée* passait une fois sous 0,3 m, puis forçait le désarmement 20 s plus tard sans
+revérifier. Sous vibration, l'altitude estimée peut dériver après le contact avec le sol et le
+drone redécoller : ces trois drones ont été coupés en l'air, après le RTL. La phase de mission,
+seule mesurée, n'est pas concernée. Le désarmement forcé exige maintenant 15 s posé d'après l'état
+vrai du simulateur (message `SIM_STATE`).
 
 ![Trajectoires vraies des vols R3 avec vibration](docs/figures/vibration_r3_trajectoires.png)
 
@@ -748,6 +759,63 @@ Limites : un vol par case, un seul vent et un seul niveau de vibration ; le mod�
 simulateur (une sinusoïde par moteur) n'a pas été comparé à des logs de vrais drones, et une
 dérive de 130 à 300 m en 60 s pour une vibration jugée acceptable reste à confirmer (un effet
 propre au simulateur n'est pas exclu).
+
+### Flux optique : naviguer sans GPS sous vibration (vols 254 à 267)
+
+Sous vibration, la navigation à l'estime dérive de 131 à 304 m en 60 s, et R3 ne reprend presque
+jamais le GPS. Un capteur de flux optique (caméra orientée vers le sol) associé à un télémètre
+mesure la vitesse par rapport au sol : il borne cette dérive sans dépendre du GPS.
+
+**Réglages** (`lancer_vol.sh --flux_optique`, fichier `scripts/flux_optique.parm` chargé au
+démarrage par `sim_vehicle.py --add-param-file`, car `FLOW_TYPE` et `RNGFND1_TYPE` ne sont lus
+qu'au démarrage) : flux simulé (`SIM_FLOW_ENABLE 1`, `FLOW_TYPE 10`, bruit `SIM_FLOW_RND` laissé à
+0,05 rad/s) et télémètre analogique repris du test `OpticalFlow` d'ArduPilot. Deux réglages
+désactivent le suivi du terrain, actif par défaut dès qu'un télémètre existe : `SURFTRAK_MODE 0`
+et `WP_RFND_USE 0` (sinon la consigne d'altitude passe de 15 à 15,5-16,7 m, vols pilotes 254 à
+256). `vol_auto.py --flux_permanent` fait fusionner le flux en permanence, même quand le GPS est
+utilisé (`EK3_SRC3_VELXY 5` et `EK3_SRC_OPTIONS 1`, « fuse all velocities ») : quand R3 bascule sur
+le jeu de sources sans GPS, le flux est déjà en place. Dans ce jeu, la vitesse GPS n'est plus
+fusionnée, car l'EKF ne la fusionne que si la source de position est le GPS
+(`AP_NavEKF3_PosVelFusion.cpp:562-565`).
+
+**Vols pilotes** (vent 6 m/s venant de 20°, turbulence 2) : la vitesse mesurée par le flux suit
+celle du GPS (corrélation 0,95 sans vibration et 0,96 avec, vols 254 et 255, flux non fusionné).
+Coupure GPS de 60 s avec traînée et vibration (vol 257, flux fusionné en permanence) : erreur de
+position vraie de 1 / 4 / 9 m à +10 / 30 / 60 s, contre 18 / 104 / 131 m sans flux (vol 234), et
+100 % du temps dans la zone. Prix à payer : en nominal sous le même vent, le maximum de
+l'innovation de vitesse SV passe de 0,31 sans flux (vol 233) à 0,51 et 0,39 avec flux (vols 256 et
+258), SP et SM restant du même ordre : le nominal s'écarte encore plus de celui sur lequel les
+détecteurs ont été calibrés.
+
+**R3 v3 avec flux optique et vibration** (vols 259 à 267, mêmes vents et mêmes instants
+d'injection que les vols 248 à 253 ; R3 inchangé) :
+
+| | Sans flux (vols 248 à 253) | Avec flux (vols 259 à 267) |
+|---|---|---|
+| Pannes | leurre de 100 m en échelon, brouillage | leurre en échelon, leurre en rampe jusqu'à 100 m, brouillage |
+| GPS écarté correctement | 6 / 6 | 9 / 9 (+0,5 à +0,7 s) |
+| GPS sain repris | 1 / 6 | **9 / 9**, 30 s après le retrait (écart 4 à 17 m, tolérance 78,8 m) |
+| Erreur de position à la fin de la panne | 113 à 319 m | **4 à 15 m** (maximum 6 à 16 m) |
+| Temps dans la zone pendant la panne | 36 à 100 % | **100 %** |
+| Dernier recours | 5 / 6 | 0 / 9 |
+
+![Erreur de navigation de R3 pendant la panne, avec et sans flux optique](docs/figures/flux_optique_r3_erreur.png)
+
+Pendant les dix premières secondes, les erreurs sont les mêmes avec et sans flux ; ensuite,
+l'erreur reste bornée à quelques mètres avec le flux. Le leurre en rampe est écarté aussi vite
+que le leurre en échelon, comme sans flux (R3 v3) : le leurre décale la position GPS mais pas la
+vitesse GPS, et l'EKF voit l'incohérence tout de suite. Le flux n'améliore pas la détection, il
+rend la suite (tenir la mission, puis revenir au GPS) possible.
+
+Un défaut reste : au vol 267 (brouillage, vent 260°), R3 écarte une seconde fois le GPS, à tort,
+38 s après l'avoir repris (innovations de vitesse et de position en hausse juste avant, cause non
+établie), et le retour se fait sans GPS. C'est aussi pendant cet atterrissage que le défaut du
+banc de test décrit plus haut a été trouvé (drone coupé en l'air à 33 m) ; les vols 264 et 265 ont
+aussi été coupés en l'air, à 2,5 et 7 m, toujours après le RTL.
+
+Limites : un vol par case, un seul vent et un seul niveau de vibration ; le flux simulé voit un
+sol plat et texturé partout, à 15 m de hauteur, de jour, sans eau ni herbe qui bouge ; le bruit
+du flux est celui par défaut du simulateur, non comparé à un vrai capteur.
 
 ## Version d'ArduPilot
 
@@ -823,7 +891,8 @@ ce dépôt, dans `~/drone/ardupilot`.
   échelles communes (une colonne par type de panne, une ligne par innovation, vol
   nominal en référence). Résultat : `docs/figures/comparaison_vols_auto.png`.
 - `scripts/lancer_vol.sh <scénario>` et `scripts/vol_auto.py` : vol SITL automatique
-  (voir « Relancer un vol »).
+  (voir « Relancer un vol »). `scripts/flux_optique.parm` : paramètres du flux optique et du
+  télémètre simulés, chargés au démarrage par `lancer_vol.sh --flux_optique`.
 - `docs/figures/` : figures issues des premiers vols.
 
 Les logs de vol (`.BIN`, `.tlog`) ne sont pas versionnés.
@@ -862,7 +931,9 @@ le décollage, uniforme en altitude. `--injection` fixe l'instant d'injection ap
 CIRCLE (120 s par défaut) : le cercle étant très régulier (un tour ≈ 31 s), il fixe aussi le cap
 du drone au début de la panne. `--amplitude` fixe le biais (m/s²) ou le décalage magnétomètre. Par vent fort, le drone posé peut rester armé (le détecteur
 d'atterrissage d'ArduPilot ne conclut pas tant que le régulateur demande de
-l'inclinaison contre le vent) : le script le désarme alors après 15 s au sol.
+l'inclinaison contre le vent) : le script le désarme alors après 15 s posé, d'après l'état vrai du
+simulateur (`SIM_STATE` : vitesse verticale sous 0,3 m/s et altitude stable à 0,3 m près pendant
+15 s ; le terrain du simulateur n'est pas plat). Si le drone n'est pas posé au bout de 120 s, il s'arrête en erreur sans couper les moteurs.
 
 Avec `--detecteur`, les quatre détecteurs tournent pendant le cercle : chaque début et fin
 d'alarme est écrit dans le journal, et toutes les mesures dans `data/en_ligne_<date>.csv`. Le
@@ -881,7 +952,11 @@ passer l'EKF, à T s de cercle, sur un jeu de sources sans GPS pendant 60 s, pui
 `scripts/recuperation.py`). `--bruit R` ajoute un bruit de gyroscope aux trois IMU pendant tout
 le vol (`SIM_GYR*_RND = R`, réglé avant le décollage). `--vibration` ajoute pendant tout le vol la
 vibration des moteurs du test `MotorVibration` d'ArduPilot (`SIM_VIB_MOT_MAX` 350,
-`SIM_GYR*_RND` 20, `SIM_ACC*_RND` 5, trois IMU).
+`SIM_GYR*_RND` 20, `SIM_ACC*_RND` 5, trois IMU). `--flux_optique` (à passer aussi à
+`lancer_vol.sh`, qui charge `scripts/flux_optique.parm` au démarrage du SITL) ajoute le capteur de
+flux optique et le télémètre simulés ; `vol_auto.py` vérifie leurs paramètres avant le vol.
+`--flux_permanent` (avec `--flux_optique`) fait fusionner le flux en permanence et l'ajoute au jeu
+de sources sans GPS.
 
 ### Vol manuel
 
@@ -962,6 +1037,9 @@ python scripts/analyse_vol.py ~/drone/ardupilot/logs/00000014.BIN docs/figures/v
   drones, modèle de vibration du simulateur) ; si oui, recalibrer les détecteurs sur des nominaux
   avec vibration et les tester sur des vols neufs, et revoir le critère de retour au GPS de R3 et
   son dernier recours (un RTL à l'estime peut finir à plusieurs kilomètres).
+- Flux optique : comprendre l'exclusion à tort du vol 267 ; recalibrer les détecteurs sur un
+  nominal avec vibration et flux fusionné (l'innovation de vitesse y est plus haute) ; tester
+  d'autres vents et des vols plus longs sans GPS.
 - Mesure de l'erreur de navigation : ne plus lire `XKF1` après un « stopped aiding » (il contient
   alors le GPS brut).
 - Remplacer la règle de R3 par un classifieur appris du type de panne, et comparer les deux.

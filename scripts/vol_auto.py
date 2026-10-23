@@ -3,6 +3,7 @@
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
                            [--reponse rien|natif|natif_trainee|r3] [--bruit R] [--vibration]
+                           [--flux_optique] [--flux_permanent]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
 derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
@@ -60,6 +61,15 @@ R = 30 ou 60 est bien plus fort que le bruit d'une vraie IMU (README).
 (Tools/autotest/arducopter.py:5644-5658), appliquées aux trois IMU : VIBRATION. Avec une
 vibration, SIM_GYR*_RND et SIM_ACC*_RND deviennent l'amplitude de sinusoïdes aux fréquences des
 moteurs au lieu d'un bruit blanc (AP_InertialSensor_SITL.cpp:245-279).
+--flux_optique : capteur de flux optique et télémètre simulés (scripts/flux_optique.parm, chargé
+au démarrage du SITL par lancer_vol.sh, car FLOW_TYPE et RNGFND1_TYPE ne sont lus qu'au
+démarrage) ; vol_auto.py vérifie seulement qu'ils sont configurés. L'EKF ne s'en sert pas tant
+qu'aucun jeu de sources ne le choisit (EK3_SRCn_VELXY = 5) : vols pilotes 254 et 255.
+--flux_permanent (avec --flux_optique) : l'EKF fusionne en permanence la vitesse du flux optique
+avec le GPS : flux déclaré comme vitesse du jeu de sources 3, inutilisé par ailleurs, et
+EK3_SRC_OPTIONS = 1 (« fuse all velocities », AP_NavEKF_Source.cpp:169-186), réglés avant le
+décollage. La vitesse GPS reste fusionnée seulement si la position active est le GPS
+(AP_NavEKF3_PosVelFusion.cpp:562-565) : une bascule sur le jeu 2 l'écarte toujours.
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -106,6 +116,9 @@ SCENARIOS = {
 }
 VIBRATION = {"SIM_VIB_MOT_MAX": 350, "SIM_GYR1_RND": 20, "SIM_GYR2_RND": 20, "SIM_GYR3_RND": 20,
              "SIM_ACC1_RND": 5, "SIM_ACC2_RND": 5, "SIM_ACC3_RND": 5}
+FLUX_OPTIQUE = {"SIM_FLOW_ENABLE": 1, "FLOW_TYPE": 10, "RNGFND1_TYPE": 1, "SURFTRAK_MODE": 0,
+                "WP_RFND_USE": 0}
+FLUX_PERMANENT = {"EK3_SRC3_VELXY": 5, "EK3_SRC_OPTIONS": 1}
 TRAINEE = {"EK3_DRAG_BCOEF_X": 9.5, "EK3_DRAG_BCOEF_Y": 9.5, "EK3_DRAG_MCOEF": 0.082}
 SOURCES_SANS_GPS = {"EK3_SRC2_POSXY": 0, "EK3_SRC2_VELXY": 0, "EK3_SRC2_POSZ": 1, "EK3_SRC2_VELZ": 0,
                     "EK3_SRC2_YAW": 1}
@@ -114,6 +127,15 @@ CERCLE_NOMINAL = 180
 CERCLE_APRES = 90
 ALT_DECOLLAGE = 15.0
 ALT_SECURITE = 8.0
+# Désarmement forcé seulement si le drone est vraiment posé (état vrai du simulateur, SIM_STATE) :
+# l'altitude estimée seule ne suffit pas, elle peut dériver au sol sous vibration et le drone
+# redécoller (log 281 : coupé à 32,8 m d'altitude vraie, logs 263, 265, 267, 278, 279 aussi).
+# Pas de comparaison à l'altitude du départ : le terrain du SITL n'est pas plat (log 264 posé 1,9 m
+# plus haut, log 211 5,3 m plus bas). En LAND, le drone descend à ≈ 0,5 m/s jusqu'au sol.
+POSE_ECART_ALT_M = 0.3  # variation de l'altitude vraie pendant POSE_DUREE_S
+POSE_VD_M_S = 0.3       # vitesse verticale vraie
+POSE_DUREE_S = 15
+POSE_ATTENTE_MAX_S = 120
 # R3 v3 : durée pendant laquelle Copter accepte la position estimée à l'estime (défaut 30 s, plage
 # documentée 0 à 120 s). Avec 30 s, Copter perdait la position avant le dernier recours de R3 et
 # refusait le RTL (vols 151, 155, 157, 159, 167, 169, 171). La navigation à l'estime commence
@@ -133,7 +155,13 @@ arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "
                        help="réponse à la panne")
 arguments.add_argument("--bruit", type=float, help="bruit de gyroscope pendant tout le vol (SIM_GYR*_RND)")
 arguments.add_argument("--vibration", action="store_true", help="vibration des moteurs pendant tout le vol")
+arguments.add_argument("--flux_optique", action="store_true",
+                       help="vérifie le flux optique et le télémètre chargés par lancer_vol.sh")
+arguments.add_argument("--flux_permanent", action="store_true",
+                       help="fusionne en permanence la vitesse du flux optique avec le GPS")
 args = arguments.parse_args()
+if args.flux_permanent and not args.flux_optique:
+    arguments.error("--flux_permanent demande --flux_optique")
 if args.reponse == "r3":
     args.detecteur = args.trainee = True
 if len(args.vent) not in (0, 3):
@@ -161,7 +189,8 @@ if args.bascule is not None and (panne is not None or args.bascule + DUREE_BASCU
 
 etat = {"alt": None, "arme": False, "mode": None, "crash": False, "fix": None, "sats": None,
         "ekf_gps": set(), "ack_takeoff": None, "ack_source": None,
-        "lat_gps": None, "lon_gps": None, "lat_est": None, "lon_est": None}
+        "lat_gps": None, "lon_gps": None, "lat_est": None, "lon_est": None,
+        "alt_vraie": None, "alt_vraie_depart": None, "vd_vraie": None}
 params = {}
 t_debut = time.monotonic()
 t_cercle = None
@@ -199,6 +228,9 @@ m = connecter()
 journal(f"Connecté au SITL, scénario {args.scenario}, vent {vent}, injection à {CERCLE_AVANT:g} s"
         + ("" if panne is None else f", valeur injectée {panne['injection']:g}"))
 m.mav.request_data_stream_send(1, 1, mavutil.mavlink.MAV_DATA_STREAM_ALL, 4, 1)
+# État vrai du simulateur à 5 Hz (intervalle en µs), pour vérifier que le drone est posé
+m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                        mavutil.mavlink.MAVLINK_MSG_ID_SIM_STATE, 200000, 0, 0, 0, 0, 0)
 
 if args.detecteur:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -224,6 +256,11 @@ def traiter(msg):
     if genre == "GLOBAL_POSITION_INT":
         etat["alt"] = msg.relative_alt / 1000
         etat["lat_est"], etat["lon_est"] = msg.lat / 1e7, msg.lon / 1e7
+    elif genre == "SIM_STATE":
+        # Altitude vraie (m, niveau de la mer) : la première, drone au sol avant l'armement, sert de référence
+        if etat["alt_vraie_depart"] is None and not etat["arme"]:
+            etat["alt_vraie_depart"] = msg.alt
+        etat["alt_vraie"], etat["vd_vraie"] = msg.alt, msg.vd
     elif genre == "HEARTBEAT" and msg.get_srcSystem() == 1 and msg.get_srcComponent() == 1:
         etat["arme"] = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
         etat["mode"] = msg.custom_mode
@@ -384,6 +421,14 @@ if not pomper(180, lambda: {"IMU0", "IMU1"} <= etat["ekf_gps"]):
     sys.exit("L'EKF n'utilise pas le GPS")
 journal("Les deux cœurs EKF utilisent le GPS")
 
+# Flux optique et télémètre : chargés au démarrage du SITL, seulement vérifiés ici
+if args.flux_optique:
+    for nom, attendu in FLUX_OPTIQUE.items():
+        valeur = lire(nom)
+        if valeur != attendu:
+            sys.exit(f"{nom} vaut {valeur}, attendu {attendu} : lancer avec lancer_vol.sh --flux_optique")
+    journal("Flux optique et télémètre simulés configurés")
+
 # Vent (avant le décollage, pour qu'il soit établi pendant tout le cercle)
 if vent is not None:
     regler({"SIM_WIND_T": 1})
@@ -407,6 +452,8 @@ if args.reponse == "r3":
     regler({"FS_DR_TIMEOUT": DUREE_ESTIME_S})
 if args.bascule is not None or args.reponse == "r3":
     regler(SOURCES_SANS_GPS)
+if args.flux_permanent:
+    regler(FLUX_PERMANENT)
 regler({"CIRCLE_RADIUS_M": 30})
 regler({"CIRCLE_RATE": 15})
 changer_mode(GUIDED, "guided")
@@ -492,11 +539,34 @@ if not pomper(900, lambda: not etat["arme"] or (etat["alt"] is not None and etat
 # Avec du vent, le drone posé peut rester armé : le régulateur demande encore de l'inclinaison
 # pour tenir la position, et le détecteur d'atterrissage d'ArduPilot ne conclut jamais
 # (drapeau ANGLE de LDET, vu au log 26). On désarme alors comme le ferait un pilote.
-if not pomper(15, lambda: not etat["arme"]):
-    journal("Toujours armé 15 s après le contact avec le sol : désarmement demandé")
+debut_pose = alt_min = alt_max = None
+fin_attente = time.monotonic() + POSE_ATTENTE_MAX_S
+while etat["arme"]:
+    if time.monotonic() > fin_attente:
+        if etat["alt_vraie"] is None:
+            sys.exit("SIM_STATE jamais reçu : pas de désarmement forcé")
+        sys.exit(f"Drone pas posé après {POSE_ATTENTE_MAX_S} s (altitude vraie "
+                 f"{etat['alt_vraie'] - etat['alt_vraie_depart']:+.1f} m) : pas de désarmement forcé")
+    pomper(0.2)
+    if etat["alt_vraie"] is None:
+        continue
+    # Posé = vitesse verticale vraie faible et altitude vraie stable depuis debut_pose
+    if debut_pose is not None:
+        alt_min, alt_max = min(alt_min, etat["alt_vraie"]), max(alt_max, etat["alt_vraie"])
+    if abs(etat["vd_vraie"]) >= POSE_VD_M_S or (debut_pose is not None and alt_max - alt_min >= POSE_ECART_ALT_M):
+        if debut_pose is not None:
+            journal(f"Drone pas posé (altitude vraie {etat['alt_vraie'] - etat['alt_vraie_depart']:+.1f} m, "
+                    f"vitesse verticale {etat['vd_vraie']:+.1f} m/s) : attente reprise")
+        debut_pose = None
+    elif debut_pose is None:
+        debut_pose, alt_min, alt_max = time.monotonic(), etat["alt_vraie"], etat["alt_vraie"]
+    elif time.monotonic() - debut_pose >= POSE_DUREE_S:
+        break
+if etat["arme"]:
+    journal(f"Toujours armé, posé depuis {POSE_DUREE_S} s (état vrai du simulateur) : désarmement demandé")
     m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0)
     if not pomper(5, lambda: not etat["arme"]):
-        journal("Désarmement refusé : désarmement forcé (drone au sol)")
+        journal("Désarmement refusé : désarmement forcé (drone posé)")
         m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 21196, 0, 0, 0, 0, 0)
         if not pomper(5, lambda: not etat["arme"]):
             sys.exit("Désarmement impossible")

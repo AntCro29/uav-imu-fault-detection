@@ -1,0 +1,20 @@
+# Capteur de flux optique et télémètre simulés, chargés au démarrage du SITL par
+# lancer_vol.sh --flux_optique (sim_vehicle.py --add-param-file) : FLOW_TYPE et RNGFND1_TYPE ne
+# sont pris en compte qu'au démarrage. Valeurs du test OpticalFlow d'ArduPilot
+# (Tools/autotest/arducopter.py:4091, vehicle_test_suite.py:6270-6277) ; bruit du flux laissé
+# à sa valeur par défaut (SIM_FLOW_RND 0,05 rad/s, le test utilise 0,02).
+SIM_FLOW_ENABLE 1
+FLOW_TYPE 10
+RNGFND1_TYPE 1
+RNGFND1_MIN 0
+RNGFND1_MAX 40
+RNGFND1_SCALING 12.12
+RNGFND1_PIN 0
+# Pas de suivi du sol (défaut 1 dès qu'un télémètre existe, ArduCopter/Parameters.cpp:873-879) :
+# la consigne d'altitude reste 15 m au-dessus du départ, comme dans les vols sans télémètre
+# (vols pilotes 254 et 255 : consigne de 15,5 à 16,7 m avec le suivi du sol)
+SURFTRAK_MODE 0
+# Décollage GUIDED et CIRCLE sans référence au terrain (défaut 1 : avec un télémètre valide,
+# « takeoff 15 » vise 15 m au-dessus du terrain, mode_guided.cpp:158-175, et le cercle suit le
+# terrain, sensors.cpp:65 ; vol pilote 256 : consigne de 16,3 m au lieu de 15)
+WP_RFND_USE 0
