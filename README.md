@@ -2,7 +2,7 @@
 
 Projet personnel, en cours : détecter automatiquement les pannes de capteurs d'un drone
 multirotor à partir de ce que voit son filtre de navigation, puis réagir sans abandonner la
-mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 340 vols, tous
+mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 376 vols, tous
 automatisés sauf les quatre premiers, qui ont servi à se familiariser avec l'interface.
 
 Titre visé : *Machine Learning Based IMU Fault Detection and Recovery for Autonomous UAVs*.
@@ -33,7 +33,8 @@ flowchart LR
     A[Vols SITL automatisés<br/>cercle de surveillance<br/>vent, vibration] --> B[Injection de pannes<br/>IMU, GPS, magnétomètre]
     B --> C[Jeu de données étiqueté<br/>innovations à 10 Hz]
     C --> D[Détecteurs<br/>seuils, Isolation Forest,<br/>autoencodeur]
-    D --> E[Réponse R3<br/>écarter le GPS,<br/>continuer la mission]
+    D --> G[Classifieur<br/>famille de la panne]
+    G --> E[Réponse R3<br/>écarter le GPS,<br/>continuer la mission]
     E --> F[Mesure sur la vérité<br/>du simulateur]
 ```
 
@@ -48,7 +49,9 @@ flowchart LR
    innovations, statut GPS, et pour chaque instant « nominal », « panne » ou « après panne ».
 4. **Des détecteurs de plus en plus élaborés**, tous entraînés ou calibrés **sur des vols sans
    panne** seulement : un seuil fixe, un seuil qui s'adapte au niveau du moment, un Isolation
-   Forest, puis un autoencodeur. Ils tournent aussi en vol, sur le flux MAVLink.
+   Forest, puis un autoencodeur. Ils tournent aussi en vol, sur le flux MAVLink. Un classifieur
+   (forêt aléatoire, `classifieur.py`) dit ensuite, 3 s après l'alarme, de quelle famille est la
+   panne : accéléromètre, gyroscope, GPS ou magnétomètre.
 5. **Une réponse aux pannes GPS, R3** (`scripts/recuperation.py`) : plutôt qu'atterrir (la
    réaction par défaut d'ArduPilot), écarter le GPS fautif, continuer le cercle à l'estime ou au
    flux optique, puis reprendre le GPS quand il redevient cohérent. Contexte visé : un
@@ -63,7 +66,7 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 
 | Étape | État | Résultat principal |
 |---|---|---|
-| Banc de vols automatique | fait | 340 vols, protocole identique depuis le vol 5 |
+| Banc de vols automatique | fait | 376 vols, protocole identique depuis le vol 5 |
 | Détection, IMU simulée idéale | fait | test sur 60 vols neufs : jusqu'à 41 pannes sur 42, aucune fausse alarme |
 | Détection en vol (temps réel) | fait | mêmes alarmes en vol qu'après coup, 0 écart sur 60 vols rejoués |
 | Récupération des pannes GPS (R3) | fait, 3 versions | GPS sain repris 6 fois sur 7 ; échoue encore sur un leurre lent |
@@ -71,7 +74,8 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 | Flux optique sous vibration | fait | R3 reprend le GPS sain 9 fois sur 9 |
 | Autoencodeur, détecteurs recalibrés sous vibration | fait | 21 pannes sur 32 sans fausse alarme ; petites pannes d'IMU manquées par tous |
 | Comprendre pourquoi les petites pannes d'IMU deviennent invisibles | fait | la vibration (gyroscopes comme accéléromètres) noie la panne dans le bruit ; l'EKF ne s'en protège pas |
-| Classification du type de panne | **en cours** | |
+| Classification de la famille de panne | fait | test sur 36 vols neufs : 18 sur 18 sans vibration, 14 sur 16 sous vibration |
+| Récupération des pannes d'IMU | **à faire** | |
 | R3 guidé par le type de panne plutôt que par une règle | à faire | |
 
 ## Résultats principaux
@@ -178,6 +182,25 @@ même et il s'attribue environ 0,45° d'erreur d'attitude quelle que soit l'erre
 optique n'y est pour rien. Deux vols par configuration ; détail dans
 [`docs/demarche.md`](docs/demarche.md).
 
+### 5. La famille de la panne se reconnaît 3 s après l'alarme
+
+Un classifieur (forêt aléatoire) reçoit les innovations des 3 s qui suivent l'alarme, leur niveau
+des 30 s précédentes et l'état du GPS, et donne la famille de la panne : accéléromètre,
+gyroscope, GPS ou magnétomètre. Il est comparé à des règles écrites à la main (GPS si le fix
+tombe, magnétomètre si SM domine, accéléromètre sinon). Testé une fois sur 36 vols neufs, sous
+des vents jamais vus à l'apprentissage :
+
+| | Pannes détectées | Règles | Forêt aléatoire |
+|---|---|---|---|
+| Sans vibration (vols 341 à 358) | 18 / 18 | 12 / 18 | **18 / 18** |
+| Vibration + flux optique (vols 359 à 376) | 16 / 18 | 7 / 16 | **14 / 16** |
+
+La forêt distingue le gyroscope de l'accéléromètre, ce que les règles ne savent pas faire, et
+reconnaît les leurres GPS, qui laissent le fix intact. Ses deux erreurs sont les deux biais
+d'accéléromètre de 1,0 m/s² sous vibration, pris pour le gyroscope : à l'apprentissage sous
+vibration, cette famille ne comptait presque que des accéléromètres bloqués. Deux vols par type
+de panne ; seule la famille est donnée, pas le type ni l'amplitude.
+
 ## Limites
 
 - Tout est simulé. Le modèle de vibration du simulateur (une oscillation par moteur) et le flux
@@ -191,9 +214,9 @@ optique n'y est pour rien. Deux vols par configuration ; détail dans
 
 ## Prochaines étapes
 
-1. **Classifier le type de panne** (en cours), à partir des signatures enregistrées sur les
-   vols avec panne.
-2. **Guider R3 par ce type de panne** plutôt que par une règle fixe : distinguer un leurre d'une
+1. **Récupérer une panne d'IMU** : injecter la panne sur une seule des trois IMU, la détecter
+   et l'écarter, et comparer à ce que fait ArduPilot seul (bascule sur l'autre cœur EKF).
+2. **Guider R3 par la famille de la panne** plutôt que par une règle fixe : distinguer un leurre d'une
    dérive d'accéléromètre avant d'écarter le GPS, et juger le GPS pendant l'exclusion autrement
    qu'en le comparant à une estimée qui dérive.
 3. Ensuite : détecter les petites pannes d'IMU sous vibration en intégrant leur effet dans le
@@ -207,7 +230,7 @@ optique n'y est pour rien. Deux vols par configuration ; détail dans
 - [`docs/demarche.md`](docs/demarche.md) : la démarche complète, étape par étape et dans l'ordre
   chronologique, avec chaque protocole, chaque chiffre, les erreurs rencontrées et leurs
   corrections.
-- [`docs/vols.md`](docs/vols.md) : la liste des 328 vols et leur numérotation.
+- [`docs/vols.md`](docs/vols.md) : la liste des 376 vols et leur numérotation.
 - [`docs/utilisation.md`](docs/utilisation.md) : le rôle de chaque script, comment relancer un vol
   (automatique ou manuel) et analyser un log.
 
@@ -215,8 +238,8 @@ optique n'y est pour rien. Deux vols par configuration ; détail dans
 
 - `scripts/` : banc de vol (`lancer_vol.sh`, `vol_auto.py`), jeu de données
   (`construire_jeu_donnees.py`), détecteurs (`detecteur_seuil.py`, `detecteur_adaptatif.py`,
-  `detecteur_ml.py`, `detecteur_ae.py`, `detecteur_en_ligne.py`), comparaisons
-  (`comparer_detecteurs.py`), récupération (`recuperation.py`, `erreur_navigation.py`) et figures.
+  `detecteur_ml.py`, `detecteur_ae.py`, `detecteur_en_ligne.py`), classifieur (`classifieur.py`),
+  comparaisons (`comparer_detecteurs.py`), récupération (`recuperation.py`, `erreur_navigation.py`) et figures.
 - `docs/` : documentation détaillée, figures, rôle des vols de la dernière campagne.
 - `data/` (non versionné) : jeux de données régénérables et journaux de vol. Les logs `.BIN`
   restent dans le dossier d'ArduPilot.

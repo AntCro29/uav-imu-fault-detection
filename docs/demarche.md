@@ -32,11 +32,13 @@ sur des vols nominaux avec vibration et flux optique, puis testés sur 32 pannes
 détecteurs ne voient plus les petites pannes d'IMU : aucun ne détecte les biais d'accéléromètre
 de 0,3 et 0,5 m/s², les dérives ni le biais de gyroscope de 0,01 rad/s. Un autoencodeur (réseau
 de neurones entraîné à reconstruire le vol nominal) détecte 21 pannes sur 32 sans fausse alarme,
-le meilleur compromis des cinq détecteurs, mais son seuil dépend du tirage initial du réseau. La
-classification du type de panne n'est pas encore abordée. Cette invisibilité vient de la
-vibration elle-même, celle des gyroscopes comme celle des accéléromètres, qui ajoute à
+le meilleur compromis des cinq détecteurs, mais son seuil dépend du tirage initial du réseau.
+L'invisibilité des petites pannes d'IMU vient de la vibration elle-même, celle des gyroscopes comme celle des accéléromètres, qui ajoute à
 l'innovation de vitesse un bruit plus fort que l'effet de la panne ; l'EKF n'élargit pas son
-incertitude et le flux optique n'y est pour rien (vols 329 à 340).
+incertitude et le flux optique n'y est pour rien (vols 329 à 340). Enfin, un classifieur
+(forêt aléatoire) donne la famille de la panne 3 s après l'alarme : testé une fois sur 36 vols
+neufs, il classe juste 18 pannes sur 18 sans vibration et 14 sur 16 sous vibration et flux
+optique (les deux biais d'accéléromètre de 1,0 m/s² pris pour le gyroscope).
 
 ## Sommaire
 
@@ -56,6 +58,7 @@ incertitude et le flux optique n'y est pour rien (vols 329 à 340).
 - [Flux optique : naviguer sans GPS sous vibration (vols 254 à 267)](#flux-optique--naviguer-sans-gps-sous-vibration-vols-254-à-267)
 - [Autoencodeur sous vibration et flux optique (vols 273 à 328)](#autoencodeur-sous-vibration-et-flux-optique-vols-273-à-328)
 - [Pourquoi les petites pannes d'IMU deviennent invisibles sous vibration (vols 329 à 340)](#pourquoi-les-petites-pannes-dimu-deviennent-invisibles-sous-vibration-vols-329-à-340)
+- [Classification de la famille de panne (vols 341 à 376)](#classification-de-la-famille-de-panne-vols-341-à-376)
 
 ## Premier détecteur à seuil (vols 5 à 11)
 
@@ -924,3 +927,79 @@ Limites : deux vols par configuration, un seul niveau de vibration, un seul vent
 petite panne (biais d'accéléromètre de 0,3 m/s²) ; les nominaux de cette campagne ne sont pas
 encore exploités. Analyse faite avec des scripts hors dépôt (lecture de `XKF1` à `XKF4`, `SIM` et
 `MSG` du cœur 0).
+
+## Classification de la famille de panne (vols 341 à 376)
+
+But : une fois l'alarme donnée, dire de quelle famille est la panne, pour choisir la réponse
+(R3 ne doit écarter le GPS que si c'est bien le GPS qui ment). Quatre familles : accéléromètre
+(biais, dérive, accéléromètre bloqué), gyroscope (biais, bruit), GPS (coupure, brouillage, leurre
+en échelon ou en rampe) et magnétomètre. Le type exact et l'amplitude ne sont pas cherchés : avec
+deux à neuf vols par type, ce serait trop ambitieux.
+
+Conception (`scripts/classifieur.py`, réglages figés le 2026-10-25 avant tout calcul) :
+
+- déclenchement à la première alarme du détecteur combiné « Isolation Forest + seuil adaptatif »
+  pendant la panne ; une panne non détectée n'est pas classée ;
+- variables, à l'instant de l'alarme : pour SV, SP, SH et SM, le maximum et la moyenne sur les
+  3 s qui suivent et la moyenne sur les 30 s qui précèdent (décalées de 2 s : niveau de fond dû au
+  vent) ; le fix et le nombre de satellites GPS les plus bas sur les 3 s qui suivent ; les canaux
+  du détecteur qui ont déclenché l'alarme. La famille est donc donnée 3 s après l'alarme ;
+- référence écrite à la main : GPS si le fix tombe sous 3D, sinon magnétomètre si SM dépasse SV,
+  sinon accéléromètre (elle ne prédit jamais le gyroscope, ce qui montre ce que doit apporter le
+  modèle) ;
+- forêt aléatoire de scikit-learn (200 arbres, graine 0, classes pondérées pour compenser leur
+  déséquilibre).
+
+**Mise au point**, en laissant de côté un vol à la fois, sur les pannes déjà enregistrées :
+
+| Jeu | Pannes classées | Règles | Forêt aléatoire | Erreurs de la forêt |
+|---|---|---|---|---|
+| Sans vibration (vols 5 à 35 et 65 à 124) | 62 (1 non détectée) | 50 / 62 | 56 / 62 | bruit de gyroscope pris pour l'accéléromètre (4 sur 5), 2 dérives prises pour le gyroscope |
+| Vibration + flux optique (vols 273 à 327) | 23 (9 non détectées) | 13 / 23 | 21 / 23 | un biais de gyroscope pris pour le GPS, une rampe de leurre classée sur une alarme déjà active à l'injection |
+
+Les règles ratent tous les gyroscopes et, sous vibration, tous les leurres (le fix GPS reste bon :
+le leurre ment sans couper le signal). Variables les plus utiles à la forêt : la moyenne et le
+maximum de SM, puis ceux de SP et SV. Résultats optimistes : beaucoup de vols sont presque des
+doublons (même panne sous un autre vent).
+
+**Campagne de test** (36 vols, protocole figé avant la campagne, test exécuté une seule fois) :
+une panne par vol, sans réponse, sous des vents jamais vus à l'apprentissage (4 m/s turbulence 1,5
+et 7 m/s turbulence 2,5), directions et instants d'injection variés. Chaque partie ne contient que
+des types de panne présents à son apprentissage.
+
+- Partie S, sans vibration ni flux (vols 341 à 358) : biais d'accéléromètre de 0,3 et 1,0 m/s²,
+  dérive jusqu'à 1,0 m/s², accéléromètre bloqué, biais de gyroscope de 0,01 et 0,02 rad/s, bruit
+  de gyroscope 60, coupure GPS de 60 s, magnétomètre ; deux vols chacun. Détecteur et forêt appris
+  sur le jeu sans vibration (`classifieur.py data/jeu_test 49 --test data/jeu_classif_s`).
+- Partie V, vibration et flux optique permanent (vols 359 à 376) : biais d'accéléromètre de
+  1,0 m/s², accéléromètre bloqué, biais de gyroscope de 0,02 rad/s, magnétomètre, leurres de 100 et
+  30 m en échelon et en rampe, brouillage ; deux vols chacun. Détecteur et forêt appris sur la
+  campagne des vols 273 à 327
+  (`classifieur.py data/jeu_nuit docs/roles_campagne_nuit.csv --test data/jeu_classif_v`).
+
+Déroulé conforme sur les 36 vols (vent, vibration et flux lus dans le log, injection à l'instant
+prévu, retrait 60 s plus tard, rampes en 61 pas, RTL 150 s après l'injection), altitude vraie
+minimale en cercle de 12,7 à 15,0 m. Les vols 373 et 375 ne sont pas désarmés (rebonds au sol
+sous vibration, la sécurité refuse de forcer), leur mission est complète.
+
+| Partie | Pannes détectées | Règles | Forêt aléatoire |
+|---|---|---|---|
+| S, sans vibration | 18 / 18 | 12 / 18 | **18 / 18** |
+| V, vibration + flux | 16 / 18 | 7 / 16 | **14 / 16** |
+
+Ce qu'il faut en retenir :
+
+- **Sans vibration, la forêt classe juste les 18 pannes**, dont les 6 de gyroscope (biais de 0,01
+  et 0,02 rad/s et bruit de 60), que les règles prennent toutes pour l'accéléromètre.
+- **Sous vibration, les 10 pannes GPS sont justes**, dont 8 leurres que les règles ne
+  reconnaissent pas. **Les deux erreurs sont les deux biais d'accéléromètre de 1,0 m/s², pris pour
+  le gyroscope** : sous vibration, la famille accéléromètre n'avait à l'apprentissage qu'un biais
+  pour quatre accéléromètres bloqués, dont la signature est très différente (ArduPilot bascule
+  aussitôt sur l'autre cœur EKF).
+- Deux pannes ne sont pas détectées, donc pas classées : un biais de gyroscope de 0,02 rad/s
+  (vol 363) et, pour la première fois, une panne de magnétomètre (vol 365, cause non cherchée).
+
+Limites : deux vols par type de panne au test ; le classifieur sous vibration n'est appris que sur
+23 pannes ; seule la famille est donnée, pas le type ni l'amplitude ; les petites pannes d'IMU
+invisibles sous vibration restent hors de portée, puisque le classifieur ne s'occupe que des
+pannes détectées.

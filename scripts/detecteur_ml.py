@@ -73,12 +73,18 @@ def scores(modele, cercle):
     return s
 
 
-def evaluer_vol(df, modele, seuil, combine=False):
-    cercle = cercle_de(df)
+def alarmes(cercle, modele, seuil, combine=False):
+    """Alarmes par canal (séries booléennes alignées sur `cercle`)."""
     par_canal = {"ML": ds.persistant(scores(modele, cercle) > seuil, PERSISTANCE),
                  "GPS": ds.persistant(cercle.gps_fix.fillna(0) < ds.FIX_3D, PERSISTANCE)}
     if combine:
         par_canal.update({c: da.alarme_canal(cercle[c].to_numpy(), da.K) for c in ds.CANAUX})
+    return par_canal
+
+
+def evaluer_vol(df, modele, seuil, combine=False):
+    cercle = cercle_de(df)
+    par_canal = alarmes(cercle, modele, seuil, combine)
     r = ds.mesurer(cercle, par_canal)
     panne = cercle.etiquette == "panne"
     if panne.any():

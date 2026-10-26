@@ -38,6 +38,11 @@ ce dépôt, dans `~/drone/ardupilot`.
   s'arrête là sans lire les logs de test, avec `--test`, détail vol par vol.
 - `docs/roles_campagne_nuit.csv` : rôle de chaque log de la campagne des vols 273 à 328
   (apprentissage, validation, test, panne), fixé avant la campagne.
+- `scripts/classifieur.py <dossier_jeu_donnees> <dernier_log_calibration | roles.csv> [--test <dossier_test>]` :
+  famille de chaque panne détectée (accéléromètre, gyroscope, GPS, magnétomètre), 3 s après la
+  première alarme du détecteur « Isolation Forest + adaptatif » ; règles écrites à la main et
+  forêt aléatoire, évaluées en laissant de côté un vol à la fois. Avec `--test`, la forêt apprise
+  sur toutes les pannes du premier dossier classe celles du dossier de test.
 - `scripts/tracer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> <log> <image.png> [titre]` :
   un vol avec ce que voient les quatre détecteurs (innovations et seuils, score de l'Isolation
   Forest, alarmes). Résultat sur le vol 104 : `docs/figures/test_derive_vol104.png`.
