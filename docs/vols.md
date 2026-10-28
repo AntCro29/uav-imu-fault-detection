@@ -1,5 +1,10 @@
 # Vols réalisés
 
+Correction du 2026-10-28 : le simulateur n'a que deux IMU (`SIM_IMU_COUNT` = 2, valeur par
+défaut). Les pannes étaient aussi réglées sur une troisième IMU (`SIM_ACC3_*`, `SIM_GYR3_*`), qui
+n'existe pas : elles ont donc toujours touché les deux IMU, et c'est ce qu'indique maintenant
+cette documentation.
+
 Numérotation : les vols manuels 1 à 4 sont les logs ArduPilot 13 à 16 ; à partir du vol 5,
 numéro du log = numéro du vol + 14 (vol 5 = `00000019.BIN`). Détail de chaque campagne dans
 [demarche.md](demarche.md).
@@ -11,14 +16,14 @@ Trois cent soixante-seize vols ont été réalisés en SITL (ArduCopter, vol en 
 | 1 | manuel | Nominal |
 | 2 | manuel | Coupure GPS de 60 s |
 | 3 | manuel | Nominal |
-| 4 | manuel | Biais de 1,0 m/s² sur l'accéléromètre X des trois IMU simulées, pendant environ 60 s |
+| 4 | manuel | Biais de 1,0 m/s² sur l'accéléromètre X des deux IMU simulées, pendant environ 60 s |
 | 5 | automatique | Décalage de +150 sur `SIM_MAG1/2/3_OFS_X` (magnétomètres), pendant 60 s |
-| 6 | automatique | Biais de 0,5 m/s² sur l'accéléromètre X des trois IMU simulées, pendant 60 s |
+| 6 | automatique | Biais de 0,5 m/s² sur l'accéléromètre X des deux IMU simulées, pendant 60 s |
 | 7 | automatique | Coupure GPS de 30 s |
 | 8 | automatique | Nominal |
 | 9 | automatique | Nominal |
 | 10 | automatique | Coupure GPS de 60 s |
-| 11 | automatique | Biais de 1,0 m/s² sur l'accéléromètre X des trois IMU simulées, pendant 60 s |
+| 11 | automatique | Biais de 1,0 m/s² sur l'accéléromètre X des deux IMU simulées, pendant 60 s |
 | 12, 13 | automatique | Nominal, vent 6 m/s venant de 270°, turbulence 2 (vols identiques) |
 | 14, 15 | automatique | Nominal, vent 3 m/s venant de 0° puis de 90°, turbulence 1 |
 | 16, 17 | automatique | Nominal, vent 6 m/s venant de 0° puis de 90°, turbulence 2 |
@@ -34,9 +39,9 @@ Trois cent soixante-seize vols ont été réalisés en SITL (ArduCopter, vol en 
 | 59 à 64 | automatique | Vols pilotes des nouvelles pannes, sans vent, pour choisir les amplitudes : dérive 0,5 m/s², biais gyroscope 0,02 rad/s, bruit gyroscope 5, accéléromètre bloqué, bruit gyroscope 30 et 60 |
 | 65 à 82 | automatique | Campagne de test, nominal : trois vols sans vent, puis trois directions de vent par vitesse (3, 4,5, 6, 7,5 et 9 m/s), directions différentes de celles déjà volées |
 | 83 à 100 | automatique | Campagne de test, pannes déjà connues (trois vols chacune, vents de 0 à 9 m/s, injection à 120, 128, 135 ou 143 s) : biais 0,2, 0,3, 0,5 et 1,0 m/s², décalage magnétomètre, coupure GPS de 60 s |
-| 101 à 109 | automatique | Campagne de test, dérive d'accéléromètre X des trois IMU (rampe sur 60 s jusqu'à 0,3, 0,5 et 1,0 m/s²), sans vent, 3 et 6 m/s |
-| 110 à 115 | automatique | Campagne de test, biais de gyroscope X des trois IMU (0,01 et 0,02 rad/s), sans vent, 3 et 6 m/s |
-| 116 à 121 | automatique | Campagne de test, bruit de gyroscope des trois IMU (`SIM_GYR*_RND` 30 et 60), sans vent, 3 et 6 m/s |
+| 101 à 109 | automatique | Campagne de test, dérive d'accéléromètre X des deux IMU (rampe sur 60 s jusqu'à 0,3, 0,5 et 1,0 m/s²), sans vent, 3 et 6 m/s |
+| 110 à 115 | automatique | Campagne de test, biais de gyroscope X des deux IMU (0,01 et 0,02 rad/s), sans vent, 3 et 6 m/s |
+| 116 à 121 | automatique | Campagne de test, bruit de gyroscope des deux IMU (`SIM_GYR*_RND` 30 et 60), sans vent, 3 et 6 m/s |
 | 122 à 124 | automatique | Campagne de test, accéléromètre de l'IMU 1 seule bloqué à 0,01 m/s² sur ses trois axes, sans vent, 3 et 6 m/s |
 | 125 à 128 | automatique | Détecteur en vol : nominal sous vent 6 m/s venant de 30°, turbulence 2 ; biais 0,3 m/s² sans vent ; décalage magnétomètre sous vent 6 m/s venant de 240°, turbulence 2 ; dérive 0,5 m/s² sans vent |
 | 129 à 131 | automatique | Navigation sans GPS, vent 6 m/s venant de 0°, turbulence 2, vent estimé par la traînée : nominal ; coupure GPS de 60 s ; abandon volontaire du GPS par l'EKF pendant 60 s |
@@ -70,7 +75,7 @@ jeu de validation pour régler ce dernier. Les vols 65 à 124 n'ont servi à auc
 forment le jeu de test final.
 
 Au vol 4, les trois biais ont été injectés l'un après l'autre, à environ 4 s
-d'intervalle (une commande par IMU), puis retirés de la même façon : les trois IMU
+d'intervalle (une commande par IMU), puis retirés de la même façon : les deux IMU
 ont été biaisées simultanément pendant environ 62 s. Dans les vols automatiques,
 les paramètres des trois capteurs sont envoyés d'affilée et les durées sont exactes
 (120 s de cercle, panne, 90 s de cercle).

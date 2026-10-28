@@ -625,7 +625,7 @@ plus fort que celui d'une vraie IMU.
 
 ## Vibration des moteurs : un nominal plus réaliste (vols 232 à 253)
 
-Ces vols reprennent les réglages du test `MotorVibration` d'ArduPilot sur les trois IMU
+Ces vols reprennent les réglages du test `MotorVibration` d'ArduPilot sur les deux IMU
 (`vol_auto.py --vibration` : `SIM_VIB_MOT_MAX` 350, `SIM_GYR1/2/3_RND` 20, `SIM_ACC1/2/3_RND` 5,
 réglés avant le décollage). Le simulateur ajoute alors aux gyroscopes et aux accéléromètres une
 oscillation par moteur, à la fréquence de ce moteur (commande × 350 Hz, `SIM_Frame.cpp:901`), et
@@ -864,7 +864,7 @@ détectés sans vibration. Trois explications étaient possibles : l'agitation n
 l'effet de la panne ; l'EKF élargit lui-même son incertitude et rejette la panne comme du bruit ;
 le flux optique, fusionné en permanence, absorbe l'erreur.
 
-Méthode : une même panne (biais de 0,3 m/s² sur l'axe X des trois accéléromètres, 60 s), un même
+Méthode : une même panne (biais de 0,3 m/s² sur l'axe X des deux accéléromètres, 60 s), un même
 vent (6 m/s, turbulence 2, venant de 20° ou de 140°), le cœur EKF 0 que lisent les détecteurs, et
 deux fenêtres de 60 s : avant l'injection et pendant la panne. Grandeurs comparées : l'écart brut
 entre vitesse GPS et vitesse prédite (`XKF3`, en m/s), le rapport SV (`XKF4`), l'écart attendu par

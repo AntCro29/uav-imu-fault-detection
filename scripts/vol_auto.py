@@ -13,11 +13,11 @@ Vent optionnel : vitesse (m/s), direction d'où il vient (degrés vrais), turbul
 --injection : instant d'injection en s après l'entrée en CIRCLE (120 par défaut). Le cercle
 est très régulier (un tour ≈ 30,8 s) : changer l'instant change le cap à l'injection.
 --amplitude : selon le scénario (vérifié dans le code SITL, commit 14c871f) :
-  biais : biais d'accéléromètre X des trois IMU, m/s² (SIM_ACC*_BIAS_X) ;
+  biais : biais d'accéléromètre X des deux IMU, m/s² (SIM_ACC*_BIAS_X) ;
   derive : valeur finale d'une rampe du même biais, atteinte à la fin des 60 s de panne
            (un pas par seconde), m/s² ;
-  gyro : biais de gyroscope X des trois IMU, rad/s (SIM_GYR*_BIAS_X) ;
-  bruit_gyro : bruit aléatoire de gyroscope des trois IMU, ajouté sur les trois axes avec une
+  gyro : biais de gyroscope X des deux IMU, rad/s (SIM_GYR*_BIAS_X) ;
+  bruit_gyro : bruit aléatoire de gyroscope des deux IMU, ajouté sur les trois axes avec une
                amplitude radians(valeur) × gaz (SIM_GYR*_RND, en °/s) ;
   bloque : accéléromètre de l'IMU 1 seule forcé à cette valeur sur ses trois axes, m/s²
            (SIM_ACCEL1_FAIL ; 0 désactive) ;
@@ -50,7 +50,7 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
        GPS (comme --bascule), retour au jeu 1, ou RTL en dernier recours (LAND si ArduPilot le
        refuse). Chaque décision est écrite dans le journal, et l'état de R3 dans la trace du
        détecteur.
---bruit R : bruit de gyroscope des trois IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
+--bruit R : bruit de gyroscope des deux IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
 le décollage, même effet que le scénario bruit_gyro : radians(R) × gaz, donc nul moteurs
 arrêtés). Le commentaire du simulateur (AP_InertialSensor_SITL.cpp:235) donne 0,2 à 0,4 rad/s
 pour un vrai multirotor, soit R ≈ 30 à 60 avec les gaz de nos vols (≈ 0,38) ; ces valeurs
@@ -58,7 +58,7 @@ correspondent en fait à la vibration d'un quad de 180 mm (voir --vibration) : e
 R = 30 ou 60 est bien plus fort que le bruit d'une vraie IMU (README).
 --vibration : vibration des moteurs pendant tout le vol, réglée avant le décollage avec les
 « valeurs réelles d'un quad de 180 mm » du test MotorVibration d'ArduPilot
-(Tools/autotest/arducopter.py:5644-5658), appliquées aux trois IMU : VIBRATION. Avec une
+(Tools/autotest/arducopter.py:5644-5658), appliquées aux deux IMU : VIBRATION. Avec une
 vibration, SIM_GYR*_RND et SIM_ACC*_RND deviennent l'amplitude de sinusoïdes aux fréquences des
 moteurs au lieu d'un bruit blanc (AP_InertialSensor_SITL.cpp:245-279). « --vibration gyro » ou
 « --vibration acc » ne fait vibrer que les gyroscopes ou que les accéléromètres (amplitude de

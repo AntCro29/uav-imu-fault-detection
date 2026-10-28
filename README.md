@@ -75,7 +75,7 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 | Autoencodeur, détecteurs recalibrés sous vibration | fait | 21 pannes sur 32 sans fausse alarme ; petites pannes d'IMU manquées par tous |
 | Comprendre pourquoi les petites pannes d'IMU deviennent invisibles | fait | la vibration (gyroscopes comme accéléromètres) noie la panne dans le bruit ; l'EKF ne s'en protège pas |
 | Classification de la famille de panne | fait | test sur 36 vols neufs : 18 sur 18 sans vibration, 14 sur 16 sous vibration |
-| Récupération des pannes d'IMU | **à faire** | |
+| Récupération des pannes d'IMU | **en cours** | |
 | R3 guidé par le type de panne plutôt que par une règle | à faire | |
 
 ## Résultats principaux
@@ -207,15 +207,16 @@ de panne ; seule la famille est donnée, pas le type ni l'amplitude.
   optique (sol plat et texturé partout) n'ont pas été comparés à de vrais vols.
 - Peu de vols par configuration (un à quatre) : les chiffres donnent un ordre de grandeur, pas
   une statistique.
-- Les pannes touchent les trois IMU à la fois (sauf l'accéléromètre bloqué) : c'est le cas le plus
+- Les pannes touchent les deux IMU à la fois (sauf l'accéléromètre bloqué) : c'est le cas le plus
   difficile, mais la comparaison entre capteurs redondants n'est pas exploitée.
 - Les leurres GPS sont simplifiés : la position est décalée, pas la vitesse.
 - Une seule mission (le cercle), un seul type de drone (le quadricoptère du simulateur).
 
 ## Prochaines étapes
 
-1. **Récupérer une panne d'IMU** : injecter la panne sur une seule des trois IMU, la détecter
-   et l'écarter, et comparer à ce que fait ArduPilot seul (bascule sur l'autre cœur EKF).
+1. **Récupérer une panne d'IMU** (en cours) : porter le simulateur à trois IMU, injecter la panne
+   sur une seule, la reconnaître par un vote entre les trois et l'écarter, et comparer à ce que
+   fait ArduPilot seul (bascule sur l'autre cœur EKF).
 2. **Guider R3 par la famille de la panne** plutôt que par une règle fixe : distinguer un leurre d'une
    dérive d'accéléromètre avant d'écarter le GPS, et juger le GPS pendant l'exclusion autrement
    qu'en le comparant à une estimée qui dérive.

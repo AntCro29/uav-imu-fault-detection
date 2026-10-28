@@ -117,9 +117,9 @@ désarmement puis arrête le SITL. Il attend que les deux cœurs EKF utilisent l
 avant de passer en GUIDED, vérifie chaque réglage et l'acceptation du décollage, et
 retire la panne si l'altitude descend sous 8 m. Le journal du vol est écrit dans
 `data/`. Scénarios : `nominal`, `gps60`, `gps30`, `biais10`, `biais05`, `magneto`, et avec
-`--amplitude` : `biais` (biais d'accéléromètre X des trois IMU, m/s²), `derive` (même biais en
-rampe sur les 60 s de panne, valeur finale en m/s²), `gyro` (biais de gyroscope X des trois IMU,
-rad/s), `bruit_gyro` (bruit aléatoire de gyroscope des trois IMU, `SIM_GYR*_RND`, amplitude
+`--amplitude` : `biais` (biais d'accéléromètre X des deux IMU, m/s²), `derive` (même biais en
+rampe sur les 60 s de panne, valeur finale en m/s²), `gyro` (biais de gyroscope X des deux IMU,
+rad/s), `bruit_gyro` (bruit aléatoire de gyroscope des deux IMU, `SIM_GYR*_RND`, amplitude
 radians(valeur) × gaz) et `bloque` (accéléromètre de l'IMU 1 seule forcé à cette valeur sur ses
 trois axes, `SIM_ACCEL1_FAIL`). Pour le GPS, en plus des coupures : `jam` (brouillage simulé,
 `SIM_GPS1_JAM` : perte du signal puis fix, satellites, vitesse et position erratiques), et avec
@@ -151,10 +151,10 @@ l'estime (`FS_DR_ENABLE 0`, qui sinon ferait rentrer le drone). `--bascule T` (v
 passer l'EKF, à T s de cercle, sur un jeu de sources sans GPS pendant 60 s, puis le ramène au GPS.
 `--reponse` choisit la réponse à la panne : `rien` (défaut), `natif` (`FS_EKF_ACTION 1`),
 `natif_trainee` (idem avec la traînée et `FS_DR_ENABLE 2`) ou `r3` (détecteur, traînée et
-`scripts/recuperation.py`). `--bruit R` ajoute un bruit de gyroscope aux trois IMU pendant tout
+`scripts/recuperation.py`). `--bruit R` ajoute un bruit de gyroscope aux deux IMU pendant tout
 le vol (`SIM_GYR*_RND = R`, réglé avant le décollage). `--vibration` ajoute pendant tout le vol la
 vibration des moteurs du test `MotorVibration` d'ArduPilot (`SIM_VIB_MOT_MAX` 350,
-`SIM_GYR*_RND` 20, `SIM_ACC*_RND` 5, trois IMU). `--flux_optique` (à passer aussi à
+`SIM_GYR*_RND` 20, `SIM_ACC*_RND` 5, deux IMU). `--flux_optique` (à passer aussi à
 `lancer_vol.sh`, qui charge `scripts/flux_optique.parm` au démarrage du SITL) ajoute le capteur de
 flux optique et le télémètre simulés ; `vol_auto.py` vérifie leurs paramètres avant le vol.
 `--flux_permanent` (avec `--flux_optique`) fait fusionner le flux en permanence et l'ajoute au jeu
@@ -206,7 +206,7 @@ retirer, puis laisser 90 s de cercle.
 # Coupure GPS
 param set SIM_GPS1_ENABLE 0    # retrait : param set SIM_GPS1_ENABLE 1
 
-# Biais accéléromètre X sur les trois IMU simulées (retrait : remettre à 0)
+# Biais accéléromètre X sur les deux IMU simulées (retrait : remettre à 0)
 param set SIM_ACC1_BIAS_X 1.0
 param set SIM_ACC2_BIAS_X 1.0
 param set SIM_ACC3_BIAS_X 1.0
