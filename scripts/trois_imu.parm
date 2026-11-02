@@ -1,0 +1,15 @@
+# Trois IMU simulées au lieu de deux, chargé au démarrage du SITL par lancer_vol.sh --imus 3
+# (sim_vehicle.py --add-param-file) : SIM_IMU_COUNT n'est lu qu'à la détection des IMU, au
+# démarrage (AP_InertialSensor.cpp:1217). L'EKF garde ses deux cœurs sur les IMU 1 et 2
+# (EK3_IMU_MASK = 3 par défaut) : la troisième ne sert que de témoin, pour un vote entre IMU.
+SIM_IMU_COUNT 3
+# Calibration factice de la troisième IMU, comme celle que copter.parm donne aux deux premières
+# (Tools/autotest/default_params/copter.parm:51-69, « small INS_ACC offsets so INS is recognised
+# as being calibrated ») : sans elle, l'armement est refusé (« 3D Accel calibration needed »,
+# AP_InertialSensor.cpp:1680-1685 : un décalage exactement nul compte comme non calibré).
+INS_ACC3OFFS_X 0.001
+INS_ACC3OFFS_Y 0.001
+INS_ACC3OFFS_Z 0.001
+INS_ACC3SCAL_X 1.001
+INS_ACC3SCAL_Y 1.001
+INS_ACC3SCAL_Z 1.001

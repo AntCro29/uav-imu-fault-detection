@@ -2,6 +2,7 @@
 # Lance un vol SITL automatique : démarre le SITL, exécute vol_auto.py, arrête le SITL.
 # Usage : scripts/lancer_vol.sh <scénario> [vitesse direction turbulence] [--injection T] [--amplitude A]
 #         [--detecteur] [--trainee] [--bascule T] [--reponse R] [--bruit R] [--vibration [gyro|acc]] [--flux_optique]
+#         [--imus 3] [--imu N]
 # Scénarios : nominal, gps60, gps30, biais10, biais05, magneto, jam, et avec --amplitude : biais,
 # derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
 # Vent optionnel : vitesse (m/s), direction d'où il vient (degrés), turbulence (m/s).
@@ -18,10 +19,15 @@ HORODATAGE="$(date '+%Y%m%d-%H%M%S')"
 
 # Capteurs pris en compte seulement au démarrage : chargés par un fichier de paramètres
 PARAMS=()
+precedente=""
 for option in "$@"; do
     if [ "$option" = "--flux_optique" ]; then
-        PARAMS=(--add-param-file "$DEPOT/scripts/flux_optique.parm")
+        PARAMS+=(--add-param-file "$DEPOT/scripts/flux_optique.parm")
     fi
+    if [ "$precedente" = "--imus" ] && [ "$option" = "3" ]; then
+        PARAMS+=(--add-param-file "$DEPOT/scripts/trois_imu.parm")
+    fi
+    precedente="$option"
 done
 
 cd "$ARDUPILOT" || exit 1

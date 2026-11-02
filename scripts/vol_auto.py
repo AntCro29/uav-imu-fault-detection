@@ -3,7 +3,7 @@
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
                            [--reponse rien|natif|natif_trainee|r3] [--bruit R] [--vibration [gyro|acc]]
-                           [--flux_optique] [--flux_permanent]
+                           [--flux_optique] [--flux_permanent] [--imus 3] [--imu N]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
 derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
@@ -72,6 +72,13 @@ avec le GPS : flux déclaré comme vitesse du jeu de sources 3, inutilisé par a
 EK3_SRC_OPTIONS = 1 (« fuse all velocities », AP_NavEKF_Source.cpp:169-186), réglés avant le
 décollage. La vitesse GPS reste fusionnée seulement si la position active est le GPS
 (AP_NavEKF3_PosVelFusion.cpp:562-565) : une bascule sur le jeu 2 l'écarte toujours.
+--imus 3 : trois IMU simulées au lieu de deux (scripts/trois_imu.parm, chargé au démarrage par
+lancer_vol.sh, car SIM_IMU_COUNT n'est lu qu'au démarrage) ; vol_auto.py vérifie seulement
+SIM_IMU_COUNT. L'EKF garde ses deux cœurs sur les IMU 1 et 2 (EK3_IMU_MASK = 3) : la
+troisième est un témoin.
+--imu N : panne d'IMU (biais, derive, gyro, bruit_gyro, bloque) sur la seule IMU N (1 à 3,
+numérotation des paramètres SIM_ACCn_*, SIM_GYRn_*, SIM_ACCELn_FAIL) au lieu de toutes. L'IMU 1
+est celle du cœur EKF 0, principal par défaut.
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -85,6 +92,7 @@ Puis mode rtl (land si ArduPilot refuse le rtl) et attente du désarmement.
 import argparse
 import csv
 import os
+import re
 import sys
 import time
 from pymavlink import mavutil
@@ -162,6 +170,9 @@ arguments.add_argument("--flux_optique", action="store_true",
                        help="vérifie le flux optique et le télémètre chargés par lancer_vol.sh")
 arguments.add_argument("--flux_permanent", action="store_true",
                        help="fusionne en permanence la vitesse du flux optique avec le GPS")
+arguments.add_argument("--imus", type=int, choices=[2, 3], default=2,
+                       help="nombre d'IMU simulées (3 : chargé par lancer_vol.sh --imus 3)")
+arguments.add_argument("--imu", type=int, choices=[1, 2, 3], help="panne d'IMU sur cette seule IMU")
 args = arguments.parse_args()
 if args.flux_permanent and not args.flux_optique:
     arguments.error("--flux_permanent demande --flux_optique")
@@ -183,8 +194,16 @@ if panne is not None:
         panne["injection"] = panne["attendu"] + args.amplitude * panne.get("echelle", 1)
     elif panne["injection"] is None:
         arguments.error(f"le scénario {args.scenario} demande --amplitude")
-elif args.amplitude is not None or args.injection != 120.0:
-    arguments.error("--injection et --amplitude sont sans objet pour un vol nominal")
+    if args.imu is not None:
+        # Paramètre de la seule IMU demandée : SIM_ACC1_BIAS_X → SIM_ACCn_BIAS_X, etc.
+        modele = re.fullmatch(r"(SIM_(?:ACC|GYR|ACCEL))1(_\w+)", panne["params"][0])
+        if modele is None:
+            arguments.error(f"--imu est sans objet pour le scénario {args.scenario}")
+        if args.imu > args.imus:
+            arguments.error(f"--imu {args.imu} demande --imus 3")
+        panne["params"] = [f"{modele[1]}{args.imu}{modele[2]}"]
+elif args.amplitude is not None or args.injection != 120.0 or args.imu is not None:
+    arguments.error("--injection, --amplitude et --imu sont sans objet pour un vol nominal")
 if args.bascule is not None and args.reponse == "r3":
     arguments.error("--bascule et --reponse r3 s'excluent")
 if args.bascule is not None and (panne is not None or args.bascule + DUREE_BASCULE > CERCLE_NOMINAL):
@@ -431,6 +450,8 @@ if args.flux_optique:
         if valeur != attendu:
             sys.exit(f"{nom} vaut {valeur}, attendu {attendu} : lancer avec lancer_vol.sh --flux_optique")
     journal("Flux optique et télémètre simulés configurés")
+if lire("SIM_IMU_COUNT") != args.imus:
+    sys.exit(f"SIM_IMU_COUNT vaut {lire('SIM_IMU_COUNT')}, attendu {args.imus} : lancer avec lancer_vol.sh --imus 3")
 
 # Vent (avant le décollage, pour qu'il soit établi pendant tout le cercle)
 if vent is not None:
