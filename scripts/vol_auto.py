@@ -50,6 +50,12 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
        GPS (comme --bascule), retour au jeu 1, ou RTL en dernier recours (LAND si ArduPilot le
        refuse). Chaque décision est écrite dans le journal, et l'état de R3 dans la trace du
        détecteur.
+  rimu : notre réponse à une panne d'IMU (vote_imu.py, avec --imus 3) : pendant le cercle, vote
+         entre les trois IMU (SCALED_IMU, SCALED_IMU2, SCALED_IMU3 à 25 Hz) ; si une IMU est
+         déclarée en panne et qu'elle est celle d'un cœur EKF, le cœur de l'autre IMU est forcé
+         principal (EK3_PRIMARY, puis EK3_OPTIONS bit 1 ManualLaneSwitch, qui verrouille ce
+         choix et désactive les bascules automatiques jusqu'à la fin du vol). Écarts du vote
+         dans data/vote_<date>.csv, décision dans le journal.
 --bruit R : bruit de gyroscope des deux IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
 le décollage, même effet que le scénario bruit_gyro : radians(R) × gaz, donc nul moteurs
 arrêtés). Le commentaire du simulateur (AP_InertialSensor_SITL.cpp:235) donne 0,2 à 0,4 rad/s
@@ -161,7 +167,7 @@ arguments.add_argument("--amplitude", type=float, help="biais (m/s²) ou décala
 arguments.add_argument("--detecteur", action="store_true", help="fait tourner les détecteurs pendant le cercle")
 arguments.add_argument("--trainee", action="store_true", help="estimation du vent par la traînée (EK3_DRAG_*)")
 arguments.add_argument("--bascule", type=float, help="instant (s de cercle) de la bascule sur le jeu de sources sans GPS")
-arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3"], default="rien",
+arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3", "rimu"], default="rien",
                        help="réponse à la panne")
 arguments.add_argument("--bruit", type=float, help="bruit de gyroscope pendant tout le vol (SIM_GYR*_RND)")
 arguments.add_argument("--vibration", nargs="?", const="toutes", choices=["toutes", "gyro", "acc"],
@@ -206,13 +212,15 @@ elif args.amplitude is not None or args.injection != 120.0 or args.imu is not No
     arguments.error("--injection, --amplitude et --imu sont sans objet pour un vol nominal")
 if args.bascule is not None and args.reponse == "r3":
     arguments.error("--bascule et --reponse r3 s'excluent")
+if args.reponse == "rimu" and args.imus != 3:
+    arguments.error("--reponse rimu demande --imus 3")
 if args.bascule is not None and (panne is not None or args.bascule + DUREE_BASCULE > CERCLE_NOMINAL):
     arguments.error(f"--bascule : vol nominal seulement, et T + {DUREE_BASCULE} s ≤ {CERCLE_NOMINAL} s")
 
 etat = {"alt": None, "arme": False, "mode": None, "crash": False, "fix": None, "sats": None,
         "ekf_gps": set(), "ack_takeoff": None, "ack_source": None,
         "lat_gps": None, "lon_gps": None, "lat_est": None, "lon_est": None,
-        "alt_vraie": None, "alt_vraie_depart": None, "vd_vraie": None}
+        "alt_vraie": None, "alt_vraie_depart": None, "vd_vraie": None, "principal": 0}
 params = {}
 t_debut = time.monotonic()
 t_cercle = None
@@ -222,6 +230,8 @@ en_cercle = False
 dernier_envoi = 0.0
 detecteur = trace = None
 alarmes = {}
+vote = trace_vote = None
+options_ek3 = None
 recup = None
 action = None       # décision de R3, exécutée par pomper() après le message qui l'a produite
 execution = False   # vrai pendant l'exécution d'une décision (pomper() y est appelé de nouveau)
@@ -270,6 +280,22 @@ if args.detecteur:
 if args.reponse == "r3":
     import recuperation
     recup = recuperation.Recuperateur()
+if args.reponse == "rimu":
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import vote_imu
+    vote = vote_imu.Vote()
+    # 25 Hz par IMU, comme les messages IMU du log sur lesquels les seuils ont été calibrés
+    for ident in (mavutil.mavlink.MAVLINK_MSG_ID_SCALED_IMU, mavutil.mavlink.MAVLINK_MSG_ID_SCALED_IMU2,
+                  mavutil.mavlink.MAVLINK_MSG_ID_SCALED_IMU3):
+        m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0, ident, 40000, 0, 0, 0, 0, 0)
+    chemin_vote = os.path.join(DEPOT, "data", f"vote_{time.strftime('%Y%m%d-%H%M%S')}.csv")
+    fichier_vote = open(chemin_vote, "w", newline="")
+    trace_vote = csv.writer(fichier_vote)
+    trace_vote.writerow(["t_cercle_s", "t_autopilote_s", "imu"]
+                        + [f"{c}{a}{b}" for c in vote_imu.SEUILS for a, b in ((0, 1), (0, 2), (1, 2))]
+                        + ["suspecte", "fautive", "principal"])
+    journal(f"R-IMU : seuils acc {vote_imu.SEUILS['acc']:.4f} m/s², gyro {vote_imu.SEUILS['gyr']:.5f} rad/s, "
+            f"trace : {chemin_vote}")
 
 
 def traiter(msg):
@@ -295,6 +321,17 @@ def traiter(msg):
             etat["crash"] = True
         if "is using GPS" in msg.text:
             etat["ekf_gps"].add(msg.text.split()[1])
+        if "primary changed:" in msg.text:
+            etat["principal"] = int(msg.text.split(":")[-1])
+    elif genre in ("SCALED_IMU", "SCALED_IMU2", "SCALED_IMU3") and vote is not None and en_cercle:
+        imu = {"SCALED_IMU": 0, "SCALED_IMU2": 1, "SCALED_IMU3": 2}[genre]
+        if vote.ajouter(imu, msg.time_boot_ms / 1000, msg) is not None:
+            action = action or "basculer_imu"
+        if vote.ecarts:
+            trace_vote.writerow([f"{time.monotonic() - t_cercle:.2f}", f"{msg.time_boot_ms / 1000:.3f}", imu]
+                                + [f"{vote.ecarts[c][p]:.5f}" for c in vote_imu.SEUILS for p in ((0, 1), (0, 2), (1, 2))]
+                                + [vote.suspecte[0] if vote.suspecte else "",
+                                   vote.fautive[0] if vote.fautive else "", etat["principal"]])
     elif genre == "COMMAND_ACK" and msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
         etat["ack_takeoff"] = msg.result
     elif genre == "COMMAND_ACK" and msg.command == mavutil.mavlink.MAV_CMD_SET_EKF_SOURCE_SET:
@@ -420,6 +457,18 @@ def executer():
     elif decision == "recours":
         journal(f"R3 : GPS écarté depuis plus de {recuperation.DUREE_MAX_S:g} s, dernier recours RTL")
         rentrer()
+    elif decision == "basculer_imu":
+        imu, capteur, _ = vote.fautive
+        if imu not in vote_imu.COEUR_DE_IMU:
+            journal(f"R-IMU : IMU {imu} ({capteur}) déclarée en panne, IMU témoin : aucune action")
+        else:
+            sain = 1 - vote_imu.COEUR_DE_IMU[imu]
+            avant = etat["principal"]
+            # D'abord le cœur voulu, puis le verrou : le bit 1 seul ramènerait sur EK3_PRIMARY = 0
+            regler({"EK3_PRIMARY": sain})
+            regler({"EK3_OPTIONS": int(options_ek3) | 2})
+            journal(f"R-IMU : IMU {imu} ({capteur}) déclarée en panne, cœur {sain} forcé "
+                    f"(principal avant : cœur {avant})")
     execution = False
 
 
@@ -452,6 +501,13 @@ if args.flux_optique:
     journal("Flux optique et télémètre simulés configurés")
 if lire("SIM_IMU_COUNT") != args.imus:
     sys.exit(f"SIM_IMU_COUNT vaut {lire('SIM_IMU_COUNT')}, attendu {args.imus} : lancer avec lancer_vol.sh --imus 3")
+if vote is not None:
+    # R-IMU suppose le cœur 0 sur l'IMU 0 et le cœur 1 sur l'IMU 1 (vote_imu.COEUR_DE_IMU)
+    masque, primaire = lire("EK3_IMU_MASK"), lire("EK3_PRIMARY")
+    if (masque, primaire) != (3, 0):
+        sys.exit(f"R-IMU suppose EK3_IMU_MASK 3 et EK3_PRIMARY 0 (lus : {masque:g}, {primaire:g})")
+    options_ek3 = lire("EK3_OPTIONS")
+    journal(f"R-IMU : EK3_IMU_MASK 3, EK3_PRIMARY 0, EK3_OPTIONS {options_ek3:g}")
 
 # Vent (avant le décollage, pour qu'il soit établi pendant tout le cercle)
 if vent is not None:
@@ -553,6 +609,8 @@ else:
 en_cercle = False
 if trace is not None:
     fichier_trace.flush()
+if trace_vote is not None:
+    fichier_vote.flush()
 if not etat["arme"]:
     # LAND ou RTL décidé par ArduPilot pendant la mission : le drone est déjà posé
     journal(f"Drone déjà posé et désarmé (mode {etat['mode']}) : pas de RTL")
