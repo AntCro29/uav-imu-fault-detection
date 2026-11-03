@@ -9,7 +9,9 @@ Numérotation : les vols manuels 1 à 4 sont les logs ArduPilot 13 à 16 ; à pa
 numéro du log = numéro du vol + 14 (vol 5 = `00000019.BIN`). Détail de chaque campagne dans
 [demarche.md](demarche.md).
 
-Trois cent soixante-seize vols ont été réalisés en SITL (ArduCopter, vol en cercle) :
+Quatre cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle), numérotés de 1 à
+440 : les numéros 377 à 388 correspondent à des tentatives sans décollage, dont les logs ont été
+supprimés.
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -65,9 +67,14 @@ Trois cent soixante-seize vols ont été réalisés en SITL (ArduCopter, vol en 
 | 329 à 340 | automatique | Séparation des causes de l'invisibilité des petites pannes d'IMU, sans réponse, vent 6 m/s venant de 20° (vols 329 à 334, injection à 128 s) ou de 140° (vols 335 à 340, injection à 135 s), turbulence 2 : nominal puis biais d'accéléromètre de 0,3 m/s², avec vibration des gyroscopes seuls, des accéléromètres seuls, puis flux optique permanent sans vibration |
 | 341 à 358 | automatique | Test du classifieur, sans vibration, sans réponse, vents 4 m/s (turbulence 1,5) et 7 m/s (turbulence 2,5) : biais d'accéléromètre 0,3 et 1,0 m/s², dérive jusqu'à 1,0 m/s², accéléromètre bloqué, biais de gyroscope 0,01 et 0,02 rad/s, bruit de gyroscope 60, coupure GPS 60 s, magnétomètre ; deux vols chacun |
 | 359 à 376 | automatique | Test du classifieur, vibration et flux optique permanent, sans réponse, mêmes vents : biais d'accéléromètre 1,0 m/s², accéléromètre bloqué, biais de gyroscope 0,02 rad/s, magnétomètre, leurres de 100 et 30 m en échelon et en rampe, brouillage ; deux vols chacun |
+| 377 à 388 | — | Pas de vol : douze tentatives à trois IMU dont l'armement a été refusé (« 3D Accel calibration needed », troisième IMU non calibrée) ; logs supprimés |
+| 389 à 400 | automatique | Vols pilotes à trois IMU, panne sur l'IMU 1 seule, sans réponse, vent 6 m/s venant de 20°, turbulence 2 : nominal, biais d'accéléromètre de 0,3 et 1,0 m/s², dérive jusqu'à 1,0 m/s², biais de gyroscope de 0,01 et 0,02 rad/s, sans vibration (vols 389 à 394) puis avec vibration et flux optique permanent (vols 395 à 400) ; vol 396 écrasé au décollage, avant la panne |
+| 401 à 410 | automatique | Calibration du vote R-IMU, nominaux à trois IMU : sans vent, 3 m/s venant de 100° (turbulence 1), 6 m/s de 220° (2), 7,5 m/s de 300° (2,5), 9 m/s de 160° (3), sans vibration (vols 401 à 405) puis avec vibration et flux optique permanent (vols 406 à 410) |
+| 411, 412 | automatique | Validation de R-IMU : biais d'accéléromètre de 1,0 m/s² sur l'IMU 1, vent 5 m/s venant de 250°, turbulence 2, injection à 135 s ; vol 411 avec la première version du vote (fenêtres décalées d'un échantillon), vol 412 avec la version corrigée |
+| 413 à 440 | automatique | Test de R-IMU, trois IMU, vents 4 m/s venant de 50° (turbulence 1,5), 7 m/s de 190° (2,5) et 8 m/s de 320° (2,5) : dix pannes sur l'IMU 1 (biais de 0,3 et 1,0 m/s², dérive jusqu'à 1,0 m/s², biais de gyroscope de 0,01 et 0,02 rad/s, sans vibration puis avec vibration et flux optique permanent), chacune volée deux fois, sans réponse puis avec R-IMU (vols 413 à 432) ; six nominaux avec R-IMU (vols 433 à 438) ; biais de 1,0 m/s² sur l'IMU 2 (vol 439) et sur l'IMU 3, témoin (vol 440), avec R-IMU |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 376 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 440 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de

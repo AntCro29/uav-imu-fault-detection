@@ -62,6 +62,17 @@ ce dépôt, dans `~/drone/ardupilot`.
   `docs/figures/coupure_gps_sans_trainee_vol23.png` et `coupure_gps_avec_trainee_vol130.png`.
 - `scripts/recuperation.py` : la réponse R3 aux pannes GPS (automate : écarter le GPS, revenir
   au GPS, dernier recours), utilisée par `vol_auto.py --reponse r3`.
+- `scripts/trois_imu.parm` : troisième IMU simulée et sa calibration factice (sans elle,
+  l'armement est refusé), chargé au démarrage par `lancer_vol.sh --imus 3`.
+- `scripts/vote_imu.py` : la réponse R-IMU (vote entre les trois IMU sur des moyennes de 2 s,
+  persistance de 0,5 s, seuils figés), utilisée par `vol_auto.py --reponse rimu`.
+- `scripts/verifier_rimu.py <premier_log> <journal> [...]` : déroulé d'une campagne à trois IMU
+  (réglages, panne sur la seule IMU demandée, instants, désarmement, trous dans le log), sans lire
+  aucun résultat. Les journaux sont triés par date et associés aux logs consécutifs.
+- `scripts/evaluer_rimu.py <premier_log> <journal> [...]` : résultats d'une campagne à trois IMU
+  (IMU déclarée par le vote et délai, changements de cœur principal, erreurs d'attitude et de
+  position vraies du cœur principal avant, pendant et après la panne). Exemple :
+  `python scripts/evaluer_rimu.py 427 data/journal_*20261102-1[4-9]*.txt`.
 - `scripts/comparer_reponses.py <image.png> <titre> <log:étiquette> [...]` : plusieurs vols
   d'une même panne, une ligne par réponse (trajectoire, positions vraie et estimée en fonction du
   temps, erreur de navigation, décisions de R3 et d'ArduPilot). Résultats :
@@ -159,6 +170,19 @@ vibration des moteurs du test `MotorVibration` d'ArduPilot (`SIM_VIB_MOT_MAX` 35
 flux optique et le télémètre simulés ; `vol_auto.py` vérifie leurs paramètres avant le vol.
 `--flux_permanent` (avec `--flux_optique`) fait fusionner le flux en permanence et l'ajoute au jeu
 de sources sans GPS.
+
+`--imus 3` (à passer aussi à `lancer_vol.sh`, qui charge `scripts/trois_imu.parm` au démarrage)
+simule trois IMU au lieu de deux ; l'EKF garde ses deux cœurs sur les IMU 1 et 2
+(`EK3_IMU_MASK` = 3), la troisième sert de témoin. `--imu N` met la panne d'IMU sur la seule
+IMU N (1 à 3, numérotation des paramètres `SIM_ACCn_*`, `SIM_GYRn_*`) ; l'IMU 1 est celle du
+cœur 0, principal par défaut. `--reponse rimu` (avec `--imus 3`) fait voter les trois IMU
+pendant le cercle (`scripts/vote_imu.py`) et, si l'IMU déclarée en panne est celle d'un cœur,
+force l'autre cœur principal jusqu'à la fin du vol. Exemple :
+
+```bash
+# biais de 1,0 m/s² sur l'IMU 1 seule, vent de 7 m/s venant de 190°, réponse R-IMU
+scripts/lancer_vol.sh biais 7 190 2.5 --imus 3 --imu 1 --injection 128 --amplitude 1.0 --reponse rimu
+```
 
 ### Vol manuel
 

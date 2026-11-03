@@ -2,7 +2,7 @@
 
 Projet personnel, en cours : détecter automatiquement les pannes de capteurs d'un drone
 multirotor à partir de ce que voit son filtre de navigation, puis réagir sans abandonner la
-mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 376 vols, tous
+mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 428 vols, tous
 automatisés sauf les quatre premiers, qui ont servi à se familiariser avec l'interface.
 
 Titre visé : *Machine Learning Based IMU Fault Detection and Recovery for Autonomous UAVs*.
@@ -35,7 +35,9 @@ flowchart LR
     C --> D[Détecteurs<br/>seuils, Isolation Forest,<br/>autoencodeur]
     D --> G[Classifieur<br/>famille de la panne]
     G --> E[Réponse R3<br/>écarter le GPS,<br/>continuer la mission]
+    A --> H[Réponse R-IMU<br/>vote entre trois IMU,<br/>cœur EKF sain forcé]
     E --> F[Mesure sur la vérité<br/>du simulateur]
+    H --> F
 ```
 
 1. **Un banc de vols automatique** (`scripts/lancer_vol.sh`, `scripts/vol_auto.py`) : le drone
@@ -56,7 +58,10 @@ flowchart LR
    réaction par défaut d'ArduPilot), écarter le GPS fautif, continuer le cercle à l'estime ou au
    flux optique, puis reprendre le GPS quand il redevient cohérent. Contexte visé : un
    environnement où le brouillage est normal et où abandonner la mission n'a pas de sens.
-6. **Une mesure honnête** : l'erreur de navigation est calculée contre la **position vraie** du
+6. **Une réponse aux pannes d'IMU, R-IMU** (`scripts/vote_imu.py`) : avec trois IMU simulées,
+   un vote désigne celle qui s'écarte des deux autres, et le drone est forcé sur le cœur EKF qui
+   n'utilise pas cette IMU.
+7. **Une mesure honnête** : l'erreur de navigation est calculée contre la **position vraie** du
    simulateur, que le drone ne connaît pas.
 
 Règles suivies pour chaque résultat : les réglages sont figés **avant** de regarder les vols de
@@ -66,7 +71,7 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 
 | Étape | État | Résultat principal |
 |---|---|---|
-| Banc de vols automatique | fait | 376 vols, protocole identique depuis le vol 5 |
+| Banc de vols automatique | fait | 428 vols, protocole identique depuis le vol 5 |
 | Détection, IMU simulée idéale | fait | test sur 60 vols neufs : jusqu'à 41 pannes sur 42, aucune fausse alarme |
 | Détection en vol (temps réel) | fait | mêmes alarmes en vol qu'après coup, 0 écart sur 60 vols rejoués |
 | Récupération des pannes GPS (R3) | fait, 3 versions | GPS sain repris 6 fois sur 7 ; échoue encore sur un leurre lent |
@@ -75,7 +80,8 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 | Autoencodeur, détecteurs recalibrés sous vibration | fait | 21 pannes sur 32 sans fausse alarme ; petites pannes d'IMU manquées par tous |
 | Comprendre pourquoi les petites pannes d'IMU deviennent invisibles | fait | la vibration (gyroscopes comme accéléromètres) noie la panne dans le bruit ; l'EKF ne s'en protège pas |
 | Classification de la famille de panne | fait | test sur 36 vols neufs : 18 sur 18 sans vibration, 14 sur 16 sous vibration |
-| Récupération des pannes d'IMU | **en cours** | |
+| Récupération des pannes d'IMU (R-IMU) | fait | test sur 28 vols neufs : bonne IMU désignée 12 fois sur 12, aucune bascule à tort ; erreur d'attitude après la panne ramenée sous 1° |
+| Boucle complète détection → classification → réponse | **en cours** | |
 | R3 guidé par le type de panne plutôt que par une règle | à faire | |
 
 ## Résultats principaux
@@ -201,29 +207,55 @@ d'accéléromètre de 1,0 m/s² sous vibration, pris pour le gyroscope : à l'ap
 vibration, cette famille ne comptait presque que des accéléromètres bloqués. Deux vols par type
 de panne ; seule la famille est donnée, pas le type ni l'amplitude.
 
+### 6. Une panne sur une seule IMU : la reconnaître par un vote et l'écarter
+
+Le simulateur a été porté à trois IMU. L'EKF d'ArduPilot fait tourner deux cœurs, l'un sur l'IMU 1,
+l'autre sur l'IMU 2 ; la troisième sert de témoin. Sur des vols pilotes avec une panne sur l'IMU 1,
+**ArduPilot ne bascule jamais sur le cœur sain** : l'erreur d'attitude vraie monte jusqu'à 6°
+alors que l'autre cœur reste sous 1° (au test, il a basculé une fois, 9,8 s après l'injection,
+une fois l'erreur montée à 5,9°). La réponse R-IMU compare en vol les trois IMU (moyennes sur
+2 s), désigne celle qui s'écarte des deux autres, puis force le cœur qui ne l'utilise pas. Ses seuils
+ont été fixés sur 12 vols normaux, avant le test.
+
+Testée une fois sur 28 vols neufs, sous trois vents jamais vus, chaque panne volée sans réponse
+puis avec R-IMU :
+
+| Erreur d'attitude max, cœur principal | Sans réponse | R-IMU |
+|---|---|---|
+| Pendant la panne, sans vibration | 1,6 à 5,9° | 0,3 à 1,7° |
+| 90 s après la panne, sans vibration | 0,2 à 4,7° | 0,2 à 0,3° |
+| Pendant la panne, vibration + flux optique | 3,4 à 6,4° | 1,1 à 3,1° |
+| 90 s après la panne, vibration + flux optique | 2,3 à 4,5° | 0,7 à 1,0° |
+
+**La bonne IMU est désignée 12 fois sur 12**, avec le bon capteur (accéléromètre ou gyroscope),
+**sans aucune désignation sur les 6 vols normaux**, en 1,1 à 5,4 s pour les biais et en 17 s pour
+les dérives lentes. L'erreur qui reste pendant la panne s'accumule avant la bascule. L'erreur de
+position, elle, reste sous 1,3 m avec ou sans réponse : le GPS la corrige. Un vol par
+configuration ; détail dans [`docs/demarche.md`](docs/demarche.md).
+
 ## Limites
 
 - Tout est simulé. Le modèle de vibration du simulateur (une oscillation par moteur) et le flux
   optique (sol plat et texturé partout) n'ont pas été comparés à de vrais vols.
 - Peu de vols par configuration (un à quatre) : les chiffres donnent un ordre de grandeur, pas
   une statistique.
-- Les pannes touchent les deux IMU à la fois (sauf l'accéléromètre bloqué) : c'est le cas le plus
-  difficile, mais la comparaison entre capteurs redondants n'est pas exploitée.
+- Les pannes d'IMU des détecteurs et du classifieur touchent toutes les IMU à la fois (sauf
+  l'accéléromètre bloqué) ; R-IMU traite l'autre cas, une seule IMU en panne, et ne peut rien
+  contre une panne commune. Sa décision est définitive jusqu'à la fin du vol.
 - Les leurres GPS sont simplifiés : la position est décalée, pas la vitesse.
 - Une seule mission (le cercle), un seul type de drone (le quadricoptère du simulateur).
 
 ## Prochaines étapes
 
-1. **Récupérer une panne d'IMU** (en cours) : porter le simulateur à trois IMU, injecter la panne
-   sur une seule, la reconnaître par un vote entre les trois et l'écarter, et comparer à ce que
-   fait ArduPilot seul (bascule sur l'autre cœur EKF).
+1. **Boucler détection → classification → réponse** (en cours) : en vol, l'alarme déclenche le
+   classifieur, et sa famille choisit la réponse (R3 pour le GPS, R-IMU pour une IMU) ; puis une
+   vidéo de démonstration.
 2. **Guider R3 par la famille de la panne** plutôt que par une règle fixe : distinguer un leurre d'une
    dérive d'accéléromètre avant d'écarter le GPS, et juger le GPS pendant l'exclusion autrement
    qu'en le comparant à une estimée qui dérive.
 3. Ensuite : détecter les petites pannes d'IMU sous vibration en intégrant leur effet dans le
-   temps ; fixer le seuil de l'autoencodeur sur davantage de vols ; pannes sur un seul capteur
-   (comparaison entre capteurs redondants) ; vérifier le réalisme de la dérive à l'estime sous
-   vibration ; comprendre l'exclusion à tort du vol 267 ; traiter la phase qui suit le retrait
+   temps ; fixer le seuil de l'autoencodeur sur davantage de vols ; vérifier le réalisme de la
+   dérive à l'estime sous vibration ; comprendre l'exclusion à tort du vol 267 ; traiter la phase qui suit le retrait
    d'une panne.
 
 ## Pour aller plus loin
@@ -231,7 +263,7 @@ de panne ; seule la famille est donnée, pas le type ni l'amplitude.
 - [`docs/demarche.md`](docs/demarche.md) : la démarche complète, étape par étape et dans l'ordre
   chronologique, avec chaque protocole, chaque chiffre, les erreurs rencontrées et leurs
   corrections.
-- [`docs/vols.md`](docs/vols.md) : la liste des 376 vols et leur numérotation.
+- [`docs/vols.md`](docs/vols.md) : la liste des 428 vols et leur numérotation.
 - [`docs/utilisation.md`](docs/utilisation.md) : le rôle de chaque script, comment relancer un vol
   (automatique ou manuel) et analyser un log.
 
@@ -240,7 +272,8 @@ de panne ; seule la famille est donnée, pas le type ni l'amplitude.
 - `scripts/` : banc de vol (`lancer_vol.sh`, `vol_auto.py`), jeu de données
   (`construire_jeu_donnees.py`), détecteurs (`detecteur_seuil.py`, `detecteur_adaptatif.py`,
   `detecteur_ml.py`, `detecteur_ae.py`, `detecteur_en_ligne.py`), classifieur (`classifieur.py`),
-  comparaisons (`comparer_detecteurs.py`), récupération (`recuperation.py`, `erreur_navigation.py`) et figures.
+  comparaisons (`comparer_detecteurs.py`), récupération GPS (`recuperation.py`, `erreur_navigation.py`),
+  récupération IMU (`vote_imu.py`, `trois_imu.parm`, `evaluer_rimu.py`) et figures.
 - `docs/` : documentation détaillée, figures, rôle des vols de la dernière campagne.
 - `data/` (non versionné) : jeux de données régénérables et journaux de vol. Les logs `.BIN`
   restent dans le dossier d'ArduPilot.

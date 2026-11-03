@@ -59,6 +59,7 @@ optique (les deux biais d'accéléromètre de 1,0 m/s² pris pour le gyroscope).
 - [Autoencodeur sous vibration et flux optique (vols 273 à 328)](#autoencodeur-sous-vibration-et-flux-optique-vols-273-à-328)
 - [Pourquoi les petites pannes d'IMU deviennent invisibles sous vibration (vols 329 à 340)](#pourquoi-les-petites-pannes-dimu-deviennent-invisibles-sous-vibration-vols-329-à-340)
 - [Classification de la famille de panne (vols 341 à 376)](#classification-de-la-famille-de-panne-vols-341-à-376)
+- [Récupération des pannes d'IMU : vote entre trois IMU (vols 389 à 440)](#récupération-des-pannes-dimu--vote-entre-trois-imu-vols-389-à-440)
 
 ## Premier détecteur à seuil (vols 5 à 11)
 
@@ -1003,3 +1004,124 @@ Limites : deux vols par type de panne au test ; le classifieur sous vibration n'
 23 pannes ; seule la famille est donnée, pas le type ni l'amplitude ; les petites pannes d'IMU
 invisibles sous vibration restent hors de portée, puisque le classifieur ne s'occupe que des
 pannes détectées.
+
+## Récupération des pannes d'IMU : vote entre trois IMU (vols 389 à 440)
+
+But : quand une seule IMU tombe en panne, la reconnaître et naviguer sur une IMU saine, puis
+comparer à ce que fait ArduPilot seul. Jusqu'ici, les pannes d'IMU touchaient les deux IMU à la
+fois (le simulateur n'en a que deux par défaut, `SIM_IMU_COUNT` = 2) : aucune redondance à
+exploiter.
+
+**Trois IMU.** `scripts/trois_imu.parm` (chargé au démarrage par `lancer_vol.sh --imus 3`) règle
+`SIM_IMU_COUNT` à 3 et donne à la troisième IMU la même calibration factice que les deux premières :
+sans elle, l'armement est refusé (« 3D Accel calibration needed » : un décalage exactement nul
+compte comme non calibré). Les douze premières tentatives (numéros 377 à 388) n'ont pas décollé
+pour cette raison. L'EKF garde ses deux cœurs, le cœur 0 sur l'IMU 1 et le cœur 1 sur l'IMU 2
+(`EK3_IMU_MASK` = 3) ; l'IMU 3 ne sert que de témoin. `vol_auto.py --imu N` met la panne sur la
+seule IMU N.
+
+**Ce que fait ArduPilot seul** (vols pilotes 389 à 400, vent 6 m/s venant de 20°, panne sur
+l'IMU 1, celle du cœur principal) : sur les 10 pannes exploitables (le vol 396 s'est écrasé au
+décollage, avant la panne), **le cœur 0 reste principal pendant toute la panne**. L'erreur
+d'attitude vraie du cœur principal monte jusqu'à 1,9° (biais de 0,3 m/s²), 5,8 à 6,0° (biais de
+1,0 m/s²), 3,7 à 4,3° (dérive jusqu'à 1,0 m/s²), 1,9 à 2,6° (gyroscope 0,01 rad/s) et 3,6 à 3,7°
+(gyroscope 0,02 rad/s), alors que le cœur 1, sain, reste entre 0,2 et 0,9°. Pour l'accéléromètre,
+l'erreur suit asin(biais / g) : l'EKF prend le biais pour une inclinaison. L'erreur de position
+reste sous 1,1 m, le GPS la corrige. Pendant la panne, les deux écarts entre l'IMU fautive et les
+autres valent l'amplitude de la panne, et l'écart entre les deux IMU saines reste normal : un vote
+peut désigner la fautive.
+
+**Conception de R-IMU** (`scripts/vote_imu.py`, `vol_auto.py --reponse rimu`, validée le
+2026-11-02) :
+
+- mesures des trois IMU reçues en vol par MAVLink (`SCALED_IMU`, `SCALED_IMU2`, `SCALED_IMU3`,
+  demandés à 25 Hz) ;
+- séparément pour l'accéléromètre et le gyroscope : moyenne de chaque IMU sur 2 s, écart entre
+  deux IMU = norme de la différence de leurs moyennes ; une IMU est suspecte si ses deux écarts
+  dépassent le seuil et si l'écart entre les deux autres reste sous le seuil ; elle est déclarée en
+  panne après 0,5 s de suspicion ;
+- si l'IMU déclarée est celle d'un cœur, l'autre cœur est forcé principal (`EK3_PRIMARY`, puis
+  bit 1 d'`EK3_OPTIONS`, qui verrouille ce choix et désactive les bascules automatiques,
+  `AP_NavEKF3.cpp:965-972`), jusqu'à la fin du vol : 90 s après le retrait d'un biais de 1,0 m/s²,
+  le cœur 0 était encore faux (vols 391 et 397). Une IMU témoin déclarée en panne n'entraîne aucune
+  action.
+
+**Calibration des seuils** sur 12 nominaux à trois IMU (vols 389, 395 et 401 à 410 ; vents de 0 à
+9 m/s, sans et avec vibration et flux optique ; cercle de 10 s au RTL) : écart maximal de
+0,134 m/s² et 0,0005 rad/s sans vibration, **0,206 m/s² et 0,0078 rad/s avec vibration** (vol 410,
+9 m/s). Seuils = 1,25 × ces maxima (marge choisie par Antoine) : 0,2575 m/s² et 0,00975 rad/s,
+figés avant le test. L'écart d'accéléromètre croît avec le vent, et c'est la paire qui contient
+l'IMU 2 qui domine (cause non vérifiée ; piste : avec `INS_FAST_SAMPLE` = 1, seule l'IMU 1
+moyenne plusieurs échantillons, ce qui avait expliqué un bruit plus fort sur l'IMU 2 aux vols 210
+à 231).
+
+**Validation** (biais de 1,0 m/s² sur l'IMU 1, vent 5 m/s venant de 250°, injection à 135 s) :
+
+- Vol 411 : un défaut est apparu. `SCALED_IMU`, `SCALED_IMU2` et `SCALED_IMU3` partent l'un après
+  l'autre avec le même horodatage ; voter à chaque message comparait des fenêtres décalées d'un
+  échantillon, et l'écart de gyroscope montait jusqu'à 0,013 rad/s en manœuvre hors panne,
+  au-dessus du seuil. Seule la persistance a évité une bascule à tort. Correction : voter seulement
+  quand les trois IMU ont leur mesure du même instant. Rejouée hors ligne sur les logs déjà
+  enregistrés, la version corrigée ne déclare rien sur les 12 nominaux et déclare chaque panne
+  pilote entre 1,1 et 17,7 s.
+- Vol 412 (version corrigée) : panne déclarée 1,1 s après l'injection, cœur 1 forcé ; erreur
+  d'attitude maximale du cœur principal 0,26° pendant la panne et 0,19° après, contre 5,81° et
+  3,29° au vol pilote 391 sans réponse. Les écarts calculés en vol sont ceux du log à 0,0002 rad/s
+  près pour le gyroscope et à 0,075 m/s² près pour l'accéléromètre (écart non expliqué).
+
+**Campagne de test** (28 vols, composition figée avant le premier vol, résultats calculés une seule
+fois avec `scripts/evaluer_rimu.py`) : trois vents jamais vus (4 m/s venant de 50°, turbulence 1,5 ;
+7 m/s de 190° et 8 m/s de 320°, turbulence 2,5), instants d'injection variés. Dix pannes sur
+l'IMU 1, chacune volée deux fois, sans réponse puis avec R-IMU : biais de 0,3 et 1,0 m/s², dérive
+jusqu'à 1,0 m/s², biais de gyroscope de 0,01 et 0,02 rad/s, sans vibration (vols 413 à 422), puis
+avec vibration et flux optique permanent (vols 423 à 432). Six nominaux avec R-IMU (vols 433
+à 438). Un biais de 1,0 m/s² sur l'IMU 2 (vol 439) et sur l'IMU 3, témoin (vol 440).
+
+Déroulé conforme sur les 28 vols (`scripts/verifier_rimu.py` : trois IMU, vent, vibration, panne sur
+le seul paramètre attendu, injection à l'instant prévu, retrait 60 s après, dérives en 60 pas, RTL).
+Le Mac s'est mis en veille pendant près de deux heures au début du cercle du vol 416 : la simulation
+s'est figée avec lui (horloge interne), et le log ne montre aucun trou (101 ms au plus entre deux
+messages, comme sur les autres vols). Les vols 428, 430 et 432 ne sont pas désarmés (rebonds au sol
+sous vibration après le RTL) ; leur mission est complète. Altitude vraie minimale en cercle de 12,2 à
+14,9 m.
+
+**Résultats :**
+
+- **IMU désignée : 12 sur 12 justes**, avec le bon capteur (accéléromètre ou gyroscope) : l'IMU 1
+  sur les dix pannes, l'IMU 2 au vol 439 (cœur 0 déjà principal, rien à changer), l'IMU 3 au
+  vol 440 (témoin, aucune action). **Aucune IMU désignée sur les six nominaux**, y compris sous
+  vibration.
+- Délai après l'injection : 1,1 à 2,6 s pour les biais d'accéléromètre et de gyroscope, 5,4 s pour
+  le gyroscope de 0,01 rad/s sous vibration (vol 430), 16,9 et 17,1 s pour les dérives (la rampe
+  n'atteint le seuil de 0,26 m/s² qu'après environ 16 s).
+- Erreur d'attitude vraie maximale du cœur principal, sans réponse → avec R-IMU :
+
+| Panne sur l'IMU 1 | Pendant, sans vibration | 90 s après, sans vibration | Pendant, vibration + flux | 90 s après, vibration + flux |
+|---|---|---|---|---|
+| Biais 0,3 m/s² | 1,58 → 0,33° | 0,92 → 0,22° | 3,43 → 1,17° | 2,29 → 0,71° |
+| Biais 1,0 m/s² | 5,93 → 0,38° | 0,24 → 0,28° | 6,38 → 1,06° | 4,07 → 0,81° |
+| Dérive jusqu'à 1,0 m/s² | 3,72 → 1,03° | 3,75 → 0,23° | 3,86 → 3,07° | 4,24 → 0,96° |
+| Gyroscope 0,01 rad/s | 1,92 → 1,32° | 1,66 → 0,25° | 4,16 → 2,11° | 3,10 → 0,93° |
+| Gyroscope 0,02 rad/s | 4,36 → 1,70° | 4,70 → 0,26° | 4,54 → 2,22° | 4,53 → 0,83° |
+
+Ce qu'il faut en retenir :
+
+- **Après la panne, R-IMU ramène l'erreur maximale entre 0,2 et 1,0° sur les dix vols**, contre
+  jusqu'à 4,7° sans réponse. Pendant la panne, ce qui reste avec R-IMU s'accumule avant la bascule,
+  pendant le délai de détection (de l'ordre de 0,02 rad/s × 1,6 s ≈ 1,8° pour le gyroscope de
+  0,02 rad/s ; non vérifié vol par vol).
+- Sous vibration, le maximum avant la panne vaut déjà 1,6 à 3,5° : au vol 428, le maximum pendant la
+  panne (3,07°) est celui d'avant, il vient probablement de la vibration.
+- L'erreur de position reste sous 1,3 m partout, avec ou sans réponse : le GPS, ou le flux optique,
+  corrige la position. Le gain de R-IMU porte sur l'attitude.
+- **Au vol 415 (biais de 1,0 m/s², sans réponse), ArduPilot a basculé seul sur le cœur 1**, 9,8 s
+  après l'injection, ce qu'il n'avait fait sur aucun vol pilote ; l'erreur d'attitude avait déjà
+  atteint 5,93°. Sous vibration, ArduPilot change plusieurs fois de cœur pendant l'atterrissage et
+  les rebonds au sol (après le RTL, jamais pendant la mission) ; avec R-IMU, le cœur forcé ne bouge
+  plus.
+
+Limites : un vol par configuration ; le niveau d'erreur avant la panne varie d'un vol à l'autre sous
+vibration ; une seule IMU en panne à la fois, la panne commune à plusieurs IMU (le cas des vols
+précédents) n'est pas reconnaissable par un vote ; la décision est définitive jusqu'à la fin du vol
+(pas de retour sur l'IMU réparée) ; le vote ne s'appuie que sur l'écart moyen sur 2 s, une panne
+plus petite que le bruit entre IMU sous vibration (de l'ordre de 0,2 m/s² et 0,008 rad/s) lui échappe.
