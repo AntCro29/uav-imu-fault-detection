@@ -1,9 +1,10 @@
 """Le classifieur de famille de panne, échantillon par échantillon, pour tourner pendant le vol.
 
 Usage :
-  python scripts/classifieur_en_ligne.py preparer <dossier_jeu_donnees> <dernier_log_apprentissage_detecteur> <fichier.joblib>
+  python scripts/classifieur_en_ligne.py preparer <dossier_jeu_donnees> <dernier_log_apprentissage_detecteur | roles.csv> <fichier.joblib> [--ae]
       Entraîne la forêt aléatoire exactement comme classifieur.py ... --test (détecteur appris sur
-      les logs ≤ dernier, forêt sur toutes les pannes détectées du dossier), puis l'enregistre.
+      les logs ≤ dernier ou « apprentissage », forêt sur toutes les pannes détectées du dossier),
+      puis l'enregistre. Avec --ae : déclencheur autoencodeur OU Isolation Forest (classifieur.py --ae).
   python scripts/classifieur_en_ligne.py rejouer <classifieur.joblib> <detecteur.joblib> <dossier_test> [log ...]
       Fait passer les CSV un échantillon à la fois dans le détecteur et le classifieur en ligne, et
       vérifie que la première classification pendant la panne a lieu au même échantillon, avec les
@@ -11,7 +12,10 @@ Usage :
       aussi les classifications faites hors de la panne.
 
 Déclenchement : début d'un épisode d'alarme du détecteur combiné (Isolation Forest OU seuil
-adaptatif OU règle GPS, la colonne « ML + adaptatif » de detecteur_en_ligne.py). La famille est
+adaptatif OU règle GPS, la colonne « ML + adaptatif » de detecteur_en_ligne.py ; avec --ae,
+autoencodeur OU Isolation Forest OU règle GPS, la colonne « AE + ML »). Les canaux sont ceux des
+variables alarme_* de la forêt. Avec --ae, un épisode qui commence avant DEBUT_CALIBRATION (10 s de
+cercle) n'est pas classé (choix d'Antoine du 2026-11-04, après l'incident au décollage du log 379). La famille est
 donnée 3 s plus tard (classifieur.APRES échantillons, l'échantillon de l'alarme compris), avec
 classifieur.variables sur l'historique du cercle : même calcul qu'après coup, sans copie. Un
 nouvel épisode n'est classé qu'après la fin de la classification en cours.
@@ -28,14 +32,15 @@ import detecteur_ml as ml
 import detecteur_en_ligne as dl
 import classifieur as cl
 
-CANAUX_ALARME = ["ML", "GPS"] + list(ds.CANAUX)   # ordre de ml.alarmes(..., combine=True)
-
 
 class ClassifieurEnLigne:
-    def __init__(self, foret):
+    def __init__(self, foret, debut=0):
         self.foret = foret
+        self.debut = debut        # premier échantillon du cercle où un épisode peut être classé
+        # canaux du déclencheur, dans l'ordre des variables de la forêt (ML, GPS, SV, SP, SM ; ou ML, GPS, AE)
+        self.canaux = [f[len("alarme_"):] for f in foret.feature_names_in_ if f.startswith("alarme_")]
         self.historique = []                              # échantillons du cercle (SV, SP, SH, SM, fix, nsats)
-        self.par_canal = {c: [] for c in CANAUX_ALARME}   # alarme de chaque canal, échantillon par échantillon
+        self.par_canal = {c: [] for c in self.canaux}     # alarme de chaque canal, échantillon par échantillon
         self.precedente = False   # alarme combinée à l'échantillon précédent
         self.k = None             # échantillon de début de l'épisode en cours de classification
 
@@ -45,12 +50,13 @@ class ClassifieurEnLigne:
         self.historique.append({"SV": sv, "SP": sp, "SH": sh, "SM": sm,
                                 "gps_fix": np.nan if gps_fix is None else gps_fix,
                                 "gps_nsats": np.nan if gps_nsats is None else gps_nsats})
-        etat = {"ML": det.ml.compte >= det.ml.n, "GPS": det.alarme_gps, **det.canaux}
-        for c in CANAUX_ALARME:
+        etat = {"ML": det.ml.compte >= det.ml.n, "GPS": det.alarme_gps, "AE": det.ae.compte >= det.ae.n,
+                **det.canaux}
+        for c in self.canaux:
             self.par_canal[c].append(bool(etat[c]))
-        alarme = any(etat.values())
+        alarme = any(etat[c] for c in self.canaux)
         k = len(self.historique) - 1
-        if alarme and not self.precedente and self.k is None:
+        if alarme and not self.precedente and self.k is None and k >= self.debut:
             self.k = k
         self.precedente = alarme
         if self.k is not None and k - self.k + 1 >= cl.APRES:
@@ -64,35 +70,39 @@ class ClassifieurEnLigne:
     def suspendre(self, depuis):
         """Oublie les échantillons à partir du numéro `depuis`, comme DetecteurEnLigne.suspendre."""
         del self.historique[depuis:]
-        for c in CANAUX_ALARME:
+        for c in self.canaux:
             del self.par_canal[c][depuis:]
         self.precedente, self.k = False, None
 
 
 def charger(fichier):
-    return ClassifieurEnLigne(joblib.load(fichier)["foret"])
+    p = joblib.load(fichier)
+    return ClassifieurEnLigne(p["foret"], p.get("debut", 0))
 
 
-def preparer(dossier, dernier, sortie):
+def preparer(dossier, calibration, sortie, avec_ae=False):
     vols = ds.charger(dossier)
-    appr = [n for n in vols if n <= dernier]
-    modele, seuil, _ = ml.entrainer(vols, appr)
-    t, manquees = cl.tableau(vols, modele, seuil)
+    appr, modele, seuil, autoencodeur = cl.preparer_detecteur(vols, calibration, avec_ae)
+    t, manquees = cl.tableau(vols, modele, seuil, autoencodeur)
     foret = cl.nouvelle_foret().fit(cl.entrees(t), t.famille)
     joblib.dump({"foret": foret, "logs_apprentissage_detecteur": appr, "seuil_ml": seuil,
-                 "pannes": t.log.tolist()}, sortie)
-    print(f"Détecteur appris sur {len(appr)} logs ({min(appr)} à {max(appr)}), seuil du score {seuil:.3f} ; "
+                 "seuil_ae": autoencodeur[1] if autoencodeur else None, "pannes": t.log.tolist(),
+                 "debut": round(ds.DEBUT_CALIBRATION * 10) if autoencodeur else 0}, sortie)
+    print(f"Détecteur appris sur {len(appr)} logs ({min(appr)} à {max(appr)}), seuil du score {seuil:.3f}"
+          + (f", seuil de l'autoencodeur {autoencodeur[1]:.4f}" if autoencodeur else "") + " ; "
           f"forêt sur {len(t)} pannes ({t.famille.value_counts().to_dict()}) ; "
           f"non détectées : {len(manquees)} -> {sortie}")
 
 
 def rejouer(fichier, fichier_detecteur, dossier, logs):
     p, pd_ = joblib.load(fichier), joblib.load(fichier_detecteur)
-    if p["seuil_ml"] != pd_["seuil_ml"] or p["logs_apprentissage_detecteur"] != pd_["logs_calibration"]:
+    if (p["seuil_ml"] != pd_["seuil_ml"] or p["logs_apprentissage_detecteur"] != pd_["logs_calibration"]
+            or p.get("seuil_ae") != pd_.get("seuil_ae")):
         sys.exit("Classifieur et détecteur appris sur des données différentes")
+    autoencodeur = (pd_["modele_ae"], pd_["seuil_ae"]) if p.get("seuil_ae") is not None else None
     vols = ds.charger(dossier)
     logs = logs or sorted(vols)
-    apres, _ = cl.tableau({n: vols[n] for n in logs}, pd_["modele"], pd_["seuil_ml"])
+    apres, _ = cl.tableau({n: vols[n] for n in logs}, pd_["modele"], pd_["seuil_ml"], autoencodeur)
     apres["foret"] = p["foret"].predict(cl.entrees(apres)) if len(apres) else []
     apres_coup = {r.log: r for r in apres.itertuples()}
     ecarts = 0
@@ -101,7 +111,7 @@ def rejouer(fichier, fichier_detecteur, dossier, logs):
         det, clf = dl.charger(fichier_detecteur), charger(fichier)
         faites = []
         for r in c.itertuples():
-            det.ajouter(r.SV, r.SP, r.SM, None if pd.isna(r.gps_fix) else r.gps_fix)
+            det.ajouter(r.SV, r.SP, r.SM, None if pd.isna(r.gps_fix) else r.gps_fix, r.SH)
             res = clf.ajouter(r.SV, r.SP, r.SH, r.SM, None if pd.isna(r.gps_fix) else r.gps_fix,
                               None if pd.isna(r.gps_nsats) else r.gps_nsats, det)
             if res:
@@ -134,8 +144,8 @@ def rejouer(fichier, fichier_detecteur, dossier, logs):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 5 and sys.argv[1] == "preparer":
-        preparer(sys.argv[2], int(sys.argv[3]), sys.argv[4])
+    if len(sys.argv) in (5, 6) and sys.argv[1] == "preparer" and sys.argv[5:] in ([], ["--ae"]):
+        preparer(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:] == ["--ae"])
     elif len(sys.argv) >= 5 and sys.argv[1] == "rejouer":
         sys.exit(1 if rejouer(sys.argv[2], sys.argv[3], sys.argv[4], [int(x) for x in sys.argv[5:]]) else 0)
     else:

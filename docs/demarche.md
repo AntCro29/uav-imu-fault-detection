@@ -1264,3 +1264,48 @@ Ce qu'il faut en retenir :
 Limites : un vol par configuration, un seul niveau de vent, sans vibration ; classifieur réentraîné
 sur des vols à deux IMU sans traînée ; une seule décision par vol (une seconde panne ne serait que
 signalée).
+
+### Boucle sous vibration (v2) : préparation, sans vol (2026-11-04)
+
+Choix d'Antoine, faits avant tout vol de la v2 :
+
+- **Déclencheur : autoencodeur OU Isolation Forest OU règle GPS.** Sur la campagne de nuit
+  (vibration et flux optique, 32 pannes, 4 908 s de nominal), le seuil adaptatif fait 13 fausses
+  alarmes et l'Isolation Forest seul ne voit que 10 pannes (son score plafonne) ; l'autoencodeur
+  en voit 21 sans fausse alarme, et l'union des deux 23, toujours sans fausse alarme : l'Isolation
+  Forest ajoute les deux biais de gyroscope de 0,02 rad/s (+9,8 et +10,7 s). Ce choix a été fait sur
+  un test déjà vu ; la campagne v2, faite de vols neufs, servira de test. Chaque détecteur a sa
+  colonne d'alarme dans la trace, avec les scores, pour attribuer après coup chaque alarme à l'un ou
+  à l'autre.
+- **Classifieur** réentraîné avec ce déclencheur (canaux d'alarme ML, GPS, AE) sur les pannes de la
+  campagne de nuit et du test V du classifieur (`data/jeu_boucle_v/`, rôles dans
+  `docs/roles_boucle_v.csv` ; détecteurs appris sur les mêmes nominaux qu'avant : seuils identiques,
+  Isolation Forest 0,740, autoencodeur 1,5617). Validation croisée : 39 pannes détectées sur 50,
+  37 / 39 bien classées (GPS 22 / 22, magnétomètre 5 / 5, gyroscope 3 / 3, accéléromètre 7 / 9 :
+  les biais de 1,0 m/s² des logs 373 et 374 restent pris pour le gyroscope, sans effet sur l'action).
+- Les vols de référence (R3, R-IMU) gardent leurs détecteurs ; seule la boucle avec `--vibration`
+  charge `data/detecteur_vibration.joblib` et `data/classifieur_boucle_v.joblib`.
+
+Rejeux : détecteur en vol v2 (six détecteurs) sur 56 vols et classifieur en vol v2 : 0 écart ;
+détecteur et classifieur v1 rejoués de nouveau : 0 écart, inchangés.
+
+**Deux classifications pendant le vol normal**, sur les vols du test V, que l'autoencodeur n'avait
+jamais vus, toutes deux déclenchées par lui seul :
+
+- log 379 (vol 365), de 3,3 à 11,3 s de cercle : incident au décollage (« ground mag anomaly »,
+  « GPS Glitch or Compass error », EKF Failsafe, « emergency yaw reset » des deux cœurs), SV et SP
+  encore à 3 à 3,7 à l'entrée en cercle. Alarme justifiée, mais elle aurait consommé la seule
+  décision du vol. **Décision d'Antoine : aucun épisode commencé avant 10 s de cercle n'est classé**
+  (même durée que celle écartée à la calibration) ; la règle du fix reste active dès le début ;
+- log 387 (vol 373), à 77,3 s : vraie fausse alarme (score 1,72 pour un seuil de 1,56), classée GPS :
+  dans la boucle, le GPS aurait été écarté à tort, puis repris par R3. **Décision d'Antoine : seuil
+  laissé tel quel**, la campagne mesurera. Ordre de grandeur attendu : une fausse alarme sur environ
+  2 300 s de nominal neuf.
+
+Limite gardée pour une version suivante (décision d'Antoine) : une seule décision par vol, même
+quand elle est « aucune action » ; une fausse alarme, ou un incident, la consomme, et une vraie
+panne plus tardive n'est que signalée.
+
+Campagne prévue (non volée) : 3 pilotes (leurre, biais sur l'IMU 1, dérive commune ; 6 m/s de 20°)
+puis 48 vols comme la v1, avec vibration et flux optique permanent, vents 6 m/s de 35°, 170° et
+310° (jamais utilisés), injection à 128, 135 et 143 s ; arguments validés par `vol_auto.py`.

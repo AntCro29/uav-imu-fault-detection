@@ -1,17 +1,21 @@
 """Les quatre détecteurs, échantillon par échantillon, pour tourner pendant le vol.
 
 Usage :
-  python scripts/detecteur_en_ligne.py preparer <dossier_jeu_donnees> <dernier_log_calibration> <fichier.joblib>
+  python scripts/detecteur_en_ligne.py preparer <dossier_jeu_donnees> <dernier_log_calibration | roles.csv> <fichier.joblib>
       Calibre le seuil fixe et entraîne l'Isolation Forest exactement comme comparer_detecteurs.py,
-      puis enregistre seuils et modèle (vol_auto.py --detecteur <fichier.joblib> les charge).
+      puis enregistre seuils et modèle (vol_auto.py --detecteur <fichier.joblib> les charge). Avec un
+      fichier de rôles (logs « apprentissage » et « validation »), entraîne aussi l'autoencodeur
+      (detecteur_ae.py, seuil sur la validation) : deux détecteurs en plus, autoencodeur et AE + ML.
   python scripts/detecteur_en_ligne.py rejouer <fichier.joblib> <dossier_jeu_donnees> [log ...]
       Fait passer les CSV un échantillon à la fois dans le détecteur en ligne et vérifie que ses
-      alarmes sont identiques à celles de l'analyse après coup (tous les logs du dossier au-delà du
-      dernier log de calibration, ou ceux donnés).
+      alarmes sont identiques à celles de l'analyse après coup (tous les logs du dossier qui n'ont
+      servi ni à la calibration ni à la validation, ou ceux donnés).
 
 Mêmes règles que l'analyse après coup, sans copie : seuil adaptatif par da.SeuilAdaptatif,
 variables de l'Isolation Forest par ml.caracteristiques sur les 32 dernières secondes.
-Détecteurs : fixe, adaptatif (k = 6), isolation forest, ML + adaptatif ; chacun avec la règle GPS.
+Détecteurs : fixe, adaptatif (k = 6), isolation forest, ML + adaptatif ; avec l'autoencodeur,
+autoencodeur et AE + ML (autoencodeur OU Isolation Forest, déclencheur de la boucle sous vibration) ;
+chacun avec la règle GPS.
 En vol, les innovations arrivent par EKF_STATUS_REPORT (mêmes valeurs que XKF4, vérifié dans le
 code d'ArduPilot, mais du cœur principal et non arrondies) : `quantifier` les tronque au
 centième comme le log.
@@ -28,8 +32,10 @@ import detecteur_seuil as ds
 import detecteur_adaptatif as da
 import detecteur_ml as ml
 import comparer_detecteurs as cd
+import detecteur_ae as ae
 
 NOMS = ["fixe", "adaptatif", "isolation forest", "ML + adaptatif"]
+NOMS_AE = ["autoencodeur", "AE + ML"]
 
 
 def quantifier(v):
@@ -49,8 +55,12 @@ class Persistance:
 
 
 class DetecteurEnLigne:
-    def __init__(self, seuil_fixe, modele, seuil_ml):
+    def __init__(self, seuil_fixe, modele, seuil_ml, modele_ae=None, seuil_ae=None):
         self.seuil_fixe, self.modele, self.seuil_ml = seuil_fixe, modele, seuil_ml
+        self.modele_ae, self.seuil_ae = modele_ae, seuil_ae
+        self.ae = Persistance(ae.PERSISTANCE)
+        self.fenetre_ae = deque(maxlen=ae.FENETRE)        # SV, SP, SH, SM des 3 dernières secondes
+        self.score_ae = np.nan
         self.fixe = {c: Persistance(cd.PERSISTANCE) for c in ds.CANAUX}
         self.adaptatif = {c: da.SeuilAdaptatif(da.K) for c in ds.CANAUX}
         self.ml = Persistance(ml.PERSISTANCE)
@@ -61,8 +71,8 @@ class DetecteurEnLigne:
         self.alarme_gps = False
         self.n = 0              # échantillons reçus (après suspendre : échantillons conservés)
 
-    def ajouter(self, sv, sp, sm, gps_fix):
-        """Un échantillon (10 Hz) ; renvoie l'état d'alarme des quatre détecteurs."""
+    def ajouter(self, sv, sp, sm, gps_fix, sh=None):
+        """Un échantillon (10 Hz) ; renvoie l'état d'alarme des détecteurs (SH sert à l'autoencodeur)."""
         x = {"SV": sv, "SP": sp, "SM": sm}
         self.n += 1
         self.recent.append(x)
@@ -78,8 +88,18 @@ class DetecteurEnLigne:
             if F.notna().all(axis=1).iloc[0]:
                 self.score = -self.modele.score_samples(F)[0]
         iso = self.ml.ajouter(self.score > self.seuil_ml)
-        return {"fixe": fixe or gps, "adaptatif": adaptatif or gps,
+        etat = {"fixe": fixe or gps, "adaptatif": adaptatif or gps,
                 "isolation forest": iso or gps, "ML + adaptatif": iso or adaptatif or gps}
+        if self.modele_ae is not None:
+            self.fenetre_ae.append((sv, sp, sh, sm))
+            self.score_ae = np.nan
+            if len(self.fenetre_ae) == ae.FENETRE:
+                # même ordre que ae.fenetres : les 30 échantillons de SV, puis de SP, de SH, de SM
+                X = (np.array(self.fenetre_ae) / self.modele_ae["echelle"]).T.reshape(1, -1)
+                self.score_ae = ((self.modele_ae["reseau"].predict(X) - X) ** 2).mean()
+            a = self.ae.ajouter(self.score_ae > self.seuil_ae)
+            etat.update({"autoencodeur": a or gps, "AE + ML": a or iso or gps})
+        return etat
 
 
     def suspendre(self, depuis):
@@ -93,28 +113,37 @@ class DetecteurEnLigne:
             canal.compte, canal.fige, canal.seuil = 0, None, None
         for _ in range(min(retires, len(self.recent))):
             self.recent.pop()
-        for p in list(self.fixe.values()) + [self.ml, self.gps]:
+        for _ in range(min(retires, len(self.fenetre_ae))):
+            self.fenetre_ae.pop()
+        for p in list(self.fixe.values()) + [self.ml, self.gps, self.ae]:
             p.compte = 0
         self.canaux = {c: False for c in ds.CANAUX}
-        self.alarme_gps, self.score, self.n = False, np.nan, depuis
+        self.alarme_gps, self.score, self.score_ae, self.n = False, np.nan, np.nan, depuis
 
 
 def charger(fichier):
     p = joblib.load(fichier)
-    return DetecteurEnLigne(p["seuil_fixe"], p["modele"], p["seuil_ml"])
+    return DetecteurEnLigne(p["seuil_fixe"], p["modele"], p["seuil_ml"], p.get("modele_ae"), p.get("seuil_ae"))
 
 
-def preparer(dossier, dernier, sortie):
+def preparer(dossier, calibration, sortie):
     vols = ds.charger(dossier)
-    calib = [n for n in vols if n <= dernier]
+    roles = ae.lire_roles(calibration) if calibration.endswith(".csv") else None
+    calib = roles["apprentissage"] if roles else [n for n in vols if n <= int(calibration)]
     nominal = pd.concat([ds.lignes_calibration(vols[n]) for n in calib])
     seuil_fixe = {c: cd.FACTEUR * nominal[c].max() for c in ds.CANAUX}
     modele, seuil_ml, n_ech = ml.entrainer(vols, calib)
-    joblib.dump({"seuil_fixe": seuil_fixe, "modele": modele, "seuil_ml": seuil_ml,
-                 "logs_calibration": calib}, sortie)
+    p = {"seuil_fixe": seuil_fixe, "modele": modele, "seuil_ml": seuil_ml, "logs_calibration": calib}
+    texte = ""
+    if roles:
+        modele_ae, n_ae = ae.entrainer(vols, calib)
+        p.update(modele_ae=modele_ae, seuil_ae=ae.fixer_seuil(modele_ae, vols, roles["validation"]),
+                 logs_validation=roles["validation"])
+        texte = f" ; autoencodeur sur {n_ae / 10:.0f} s, seuil {p['seuil_ae']:.4f} (validation {roles['validation']})"
+    joblib.dump(p, sortie)
     print(f"Calibration sur {len(calib)} logs ({min(calib)} à {max(calib)}) : seuils fixes "
           + ", ".join(f"{c} {v:.2f}" for c, v in seuil_fixe.items())
-          + f" ; Isolation Forest sur {n_ech / 10:.0f} s, seuil du score {seuil_ml:.3f} -> {sortie}")
+          + f" ; Isolation Forest sur {n_ech / 10:.0f} s, seuil du score {seuil_ml:.3f}{texte} -> {sortie}")
 
 
 def alarmes_apres_coup(df, p):
@@ -124,22 +153,27 @@ def alarmes_apres_coup(df, p):
     fixe = pd.concat([ds.persistant(c[k] > p["seuil_fixe"][k], cd.PERSISTANCE) for k in ds.CANAUX], axis=1).any(axis=1)
     adapt = pd.concat([da.alarme_canal(c[k].to_numpy(), da.K) for k in ds.CANAUX], axis=1).any(axis=1)
     iso = ds.persistant(ml.scores(p["modele"], c) > p["seuil_ml"], ml.PERSISTANCE)
-    return pd.DataFrame({"fixe": fixe | gps, "adaptatif": adapt | gps,
-                         "isolation forest": iso | gps, "ML + adaptatif": iso | adapt | gps})
+    r = pd.DataFrame({"fixe": fixe | gps, "adaptatif": adapt | gps,
+                      "isolation forest": iso | gps, "ML + adaptatif": iso | adapt | gps})
+    if "modele_ae" in p:
+        a = ds.persistant(ae.scores(p["modele_ae"], c) > p["seuil_ae"], ae.PERSISTANCE)
+        r["autoencodeur"], r["AE + ML"] = a | gps, a | iso | gps
+    return r
 
 
 def rejouer(fichier, dossier, logs):
     p = joblib.load(fichier)
     vols = ds.charger(dossier)
-    logs = logs or [n for n in vols if n > max(p["logs_calibration"])]
+    logs = logs or [n for n in vols if n not in p["logs_calibration"] + p.get("logs_validation", [])]
+    noms = NOMS + (NOMS_AE if "modele_ae" in p else [])
     ecarts = 0
     for n in logs:
         c = ml.cercle_de(vols[n])
         det = charger(fichier)
-        en_ligne = pd.DataFrame([det.ajouter(r.SV, r.SP, r.SM, None if pd.isna(r.gps_fix) else r.gps_fix)
+        en_ligne = pd.DataFrame([det.ajouter(r.SV, r.SP, r.SM, None if pd.isna(r.gps_fix) else r.gps_fix, r.SH)
                                  for r in c.itertuples()])
         apres = alarmes_apres_coup(vols[n], p)
-        diff = (en_ligne[NOMS] != apres[NOMS]).sum()
+        diff = (en_ligne[noms] != apres[noms]).sum()
         ecarts += int(diff.sum())
         print(f"log {n:>4} : {len(c)} échantillons, écarts " + ", ".join(f"{k} {v}" for k, v in diff.items()))
     print(f"\n{len(logs)} logs rejoués : {ecarts} échantillon(s) différent(s) au total")
@@ -148,7 +182,7 @@ def rejouer(fichier, dossier, logs):
 
 if __name__ == "__main__":
     if len(sys.argv) >= 5 and sys.argv[1] == "preparer":
-        preparer(sys.argv[2], int(sys.argv[3]), sys.argv[4])
+        preparer(sys.argv[2], sys.argv[3], sys.argv[4])
     elif len(sys.argv) >= 4 and sys.argv[1] == "rejouer":
         sys.exit(1 if rejouer(sys.argv[2], sys.argv[3], [int(x) for x in sys.argv[4:]]) else 0)
     else:

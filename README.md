@@ -85,7 +85,7 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 | Classification de la famille de panne | fait | test sur 36 vols neufs : 18 sur 18 sans vibration, 14 sur 16 sous vibration |
 | Récupération des pannes d'IMU (R-IMU) | fait | test sur 28 vols neufs : bonne IMU désignée 12 fois sur 12, aucune bascule à tort ; erreur d'attitude après la panne ramenée sous 1° |
 | Boucle complète détection → classification → réponse, sans vibration | fait | test sur 48 vols neufs : bonne réponse 24 fois sur 24 sans connaître la panne, comme la réponse choisie à la main |
-| Boucle complète sous vibration | à faire | |
+| Boucle complète sous vibration | en cours | préparée et vérifiée hors ligne (déclencheur autoencodeur OU Isolation Forest) ; vols à faire |
 | R3 guidé par le type de panne plutôt que par une règle | en partie (boucle) | reste à juger le GPS pendant l'exclusion |
 
 ## Résultats principaux
@@ -281,6 +281,8 @@ de mètres). La dérive a été comparée à R-IMU, pas à R3 seul : ce test ne 
   l'accéléromètre bloqué) ; R-IMU traite l'autre cas, une seule IMU en panne, et ne peut rien
   contre une panne commune. Sa décision est définitive jusqu'à la fin du vol.
 - Les leurres GPS sont simplifiés : la position est décalée, pas la vitesse.
+- La boucle prend une seule décision par vol : une fausse alarme ou un incident la consomme, et une
+  vraie panne plus tardive n'est que signalée.
 - La boucle n'est testée que sans vibration. Son classifieur a appris les leurres sur des vols à
   deux IMU et sans modèle de traînée, alors qu'elle vole avec trois IMU et la traînée.
 - Une seule mission (le cercle), un seul type de drone (le quadricoptère du simulateur).

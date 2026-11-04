@@ -64,7 +64,11 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
            GPS → R3 écarte le GPS (sauf si le vote a déjà désigné une IMU, ou si le GPS est déjà
            écarté) ; accéléromètre ou gyroscope → aucune action sur le GPS (bascule du vote
            confirmée, ou panne non isolée par le vote, signalée) ; magnétomètre → signalé. Les
-           épisodes suivants sont classés et écrits dans le journal, sans action.
+           épisodes suivants sont classés et écrits dans le journal, sans action. Avec --vibration
+           (boucle v2, choix d'Antoine du 2026-11-04) : déclencheur autoencodeur OU Isolation Forest
+           OU règle GPS (data/detecteur_vibration.joblib, data/classifieur_boucle_v.joblib) ; les
+           alarmes de chaque détecteur et le score de l'autoencodeur sont dans la trace, les canaux
+           qui ont déclenché chaque classification dans le journal.
 --bruit R : bruit de gyroscope des deux IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
 le décollage, même effet que le scénario bruit_gyro : radians(R) × gaz, donc nul moteurs
 arrêtés). Le commentaire du simulateur (AP_InertialSensor_SITL.cpp:235) donne 0,2 à 0,4 rad/s
@@ -115,6 +119,10 @@ from pymavlink import mavutil
 DEPOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FICHIER_DETECTEUR = os.path.join(DEPOT, "data", "detecteur_en_ligne.joblib")
 FICHIER_CLASSIFIEUR = os.path.join(DEPOT, "data", "classifieur_boucle.joblib")
+# boucle sous vibration : autoencodeur OU Isolation Forest (detecteur_en_ligne.py preparer data/jeu_boucle_v
+# docs/roles_boucle_v.csv ; classifieur_en_ligne.py preparer ... --ae)
+FICHIER_DETECTEUR_VIBRATION = os.path.join(DEPOT, "data", "detecteur_vibration.joblib")
+FICHIER_CLASSIFIEUR_VIBRATION = os.path.join(DEPOT, "data", "classifieur_boucle_v.joblib")
 
 # 1° de latitude en m : LATLON_TO_M d'ArduPilot (AP_Math/definitions.h:52, m pour 1e-7 degré)
 M_PAR_DEGRE = 0.011131884502145034 * 1e7
@@ -194,6 +202,8 @@ if args.flux_permanent and not args.flux_optique:
     arguments.error("--flux_permanent demande --flux_optique")
 if args.reponse in ("r3", "boucle"):
     args.detecteur = args.trainee = True
+if args.reponse == "boucle" and args.vibration:
+    FICHIER_DETECTEUR, FICHIER_CLASSIFIEUR = FICHIER_DETECTEUR_VIBRATION, FICHIER_CLASSIFIEUR_VIBRATION
 if len(args.vent) not in (0, 3):
     arguments.error("le vent demande trois valeurs : vitesse direction turbulence")
 vent = args.vent or None
@@ -280,14 +290,16 @@ if args.detecteur:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import detecteur_en_ligne as enligne
     detecteur = enligne.charger(FICHIER_DETECTEUR)
-    alarmes = {nom: False for nom in enligne.NOMS}
+    NOMS_DETECTEURS = enligne.NOMS + (enligne.NOMS_AE if detecteur.modele_ae is not None else [])
+    alarmes = {nom: False for nom in NOMS_DETECTEURS}
     # 10 Hz, comme XKF4 (intervalle en µs)
     m.mav.command_long_send(1, 1, mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
                             mavutil.mavlink.MAVLINK_MSG_ID_EKF_STATUS_REPORT, 100000, 0, 0, 0, 0, 0)
     chemin_trace = os.path.join(DEPOT, "data", f"en_ligne_{time.strftime('%Y%m%d-%H%M%S')}.csv")
     fichier_trace = open(chemin_trace, "w", newline="")
     trace = csv.writer(fichier_trace)
-    trace.writerow(["t_cercle_s", "SV", "SP", "SM", "gps_fix", "score_ml"] + enligne.NOMS + ["r3", "SH", "famille"])
+    trace.writerow(["t_cercle_s", "SV", "SP", "SM", "gps_fix", "score_ml"] + NOMS_DETECTEURS
+                   + ["r3", "SH", "famille", "score_ae"])
     journal(f"Détecteur en ligne chargé ({FICHIER_DETECTEUR}), trace : {chemin_trace}")
 if args.reponse in ("r3", "boucle"):
     import recuperation
@@ -295,7 +307,8 @@ if args.reponse in ("r3", "boucle"):
 if args.reponse == "boucle":
     import joblib
     import classifieur_en_ligne
-    if joblib.load(FICHIER_CLASSIFIEUR)["seuil_ml"] != joblib.load(FICHIER_DETECTEUR)["seuil_ml"]:
+    pc, pd_ = joblib.load(FICHIER_CLASSIFIEUR), joblib.load(FICHIER_DETECTEUR)
+    if pc["seuil_ml"] != pd_["seuil_ml"] or pc.get("seuil_ae") != pd_.get("seuil_ae"):
         sys.exit("Classifieur et détecteur appris sur des données différentes")
     classif = classifieur_en_ligne.charger(FICHIER_CLASSIFIEUR)
     journal(f"Classifieur en ligne chargé ({FICHIER_CLASSIFIEUR})")
@@ -362,11 +375,14 @@ def traiter(msg):
         if recup is not None and recup.etat != "normal":
             # GPS écarté : innovations figées par l'EKF, le détecteur n'est pas alimenté (R3 v2)
             trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"], ""]
-                           + [""] * len(enligne.NOMS) + [recup.etat, v["SH"], ""])
+                           + [""] * len(NOMS_DETECTEURS) + [recup.etat, v["SH"], "", ""])
             return
-        etats = detecteur.ajouter(v["SV"], v["SP"], v["SM"], etat["fix"])
+        etats = detecteur.ajouter(v["SV"], v["SP"], v["SM"], etat["fix"], v["SH"])
         if recup is not None:
-            action = action or recup.detecteur(time.monotonic(), detecteur.n - 1, detecteur.canaux,
+            # début d'épisode daté par les canaux du déclencheur (v2 : AE et IF, pas le seuil adaptatif)
+            canaux = (detecteur.canaux if detecteur.modele_ae is None else
+                      {"AE": detecteur.ae.compte >= detecteur.ae.n, "ML": detecteur.ml.compte >= detecteur.ml.n})
+            action = action or recup.detecteur(time.monotonic(), detecteur.n - 1, canaux,
                                                detecteur.alarme_gps, etat["fix"])
         classe = None
         if classif is not None:
@@ -374,8 +390,9 @@ def traiter(msg):
             if classe is not None:
                 decider(*classe)
         trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"],
-                        f"{detecteur.score:.4f}"] + [int(etats[n]) for n in enligne.NOMS]
-                       + [recup.etat if recup is not None else "", v["SH"], classe[0] if classe else ""])
+                        f"{detecteur.score:.4f}"] + [int(etats[n]) for n in NOMS_DETECTEURS]
+                       + [recup.etat if recup is not None else "", v["SH"], classe[0] if classe else "",
+                          f"{detecteur.score_ae:.4f}"])
         for nom, actif in etats.items():
             if actif != alarmes[nom]:
                 texte = "ALARME" if actif else "fin d'alarme"
@@ -394,6 +411,8 @@ def decider(famille, k, variables):
     """Boucle : réponse à la famille donnée par le classifieur pour l'épisode commencé à l'échantillon k."""
     global action, decision_boucle
     delai = (detecteur.n - 1 - k) / 10
+    canaux = [nom[len("alarme_"):] for nom, a in variables.items() if nom.startswith("alarme_") and a]
+    journal(f"BOUCLE : épisode déclenché par {', '.join(canaux) or '?'} ; famille {famille}")
     if decision_boucle is not None:
         journal(f"BOUCLE : épisode classé {famille} (alarme {delai:.1f} s plus tôt), sans action : "
                 f"décision déjà prise ({decision_boucle})")

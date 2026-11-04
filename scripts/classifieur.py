@@ -1,13 +1,16 @@
 """Classification de la famille d'une panne, 3 s après la première alarme du détecteur.
 
 Usage : python scripts/classifieur.py <dossier_jeu_donnees> <dernier_log_apprentissage_detecteur | roles.csv>
-                                      [--test <dossier_test>]
+                                      [--ae] [--test <dossier_test>]
 Les logs ≤ dernier_log_apprentissage_detecteur (ou les logs « apprentissage » du fichier de rôles)
 servent à entraîner l'Isolation Forest du détecteur (comme comparer_detecteurs.py) ; tous les vols
 avec panne sont ensuite classés.
 
 Déclenchement : première alarme du détecteur combiné (Isolation Forest OU seuil adaptatif k = 6,
-règle GPS comprise) pendant la panne. Une panne non détectée n'est pas classée.
+règle GPS comprise) pendant la panne. Une panne non détectée n'est pas classée. Avec --ae (fichier de
+rôles obligatoire), le déclencheur est autoencodeur OU Isolation Forest OU règle GPS (boucle sous
+vibration, choix d'Antoine du 2026-11-04) : autoencodeur entraîné sur les logs « apprentissage », seuil
+sur les logs « validation » (detecteur_ae.py), canaux d'alarme ML, GPS et AE.
 Familles : accéléromètre (acc, derive, bloque), gyroscope (gyr, bruit_gyr), GPS (gps, jam, leurre,
 leurre_rampe), magnétomètre (mag).
 Variables, à l'instant de l'alarme k (10 Hz) :
@@ -75,14 +78,23 @@ def matrice(vraies, predites):
     return m
 
 
-def tableau(vols, modele, seuil):
+def alarmes(cercle, modele, seuil, autoencodeur=None):
+    """Canaux du déclencheur : ML + adaptatif, ou ML + AE si `autoencodeur` = (modèle, seuil)."""
+    if autoencodeur is None:
+        return ml.alarmes(cercle, modele, seuil, combine=True)
+    par_canal = ml.alarmes(cercle, modele, seuil)
+    par_canal["AE"] = ds.persistant(ae.scores(autoencodeur[0], cercle) > autoencodeur[1], ae.PERSISTANCE)
+    return par_canal
+
+
+def tableau(vols, modele, seuil, autoencodeur=None):
     """Une ligne par vol avec panne détectée : variables à la première alarme pendant la panne."""
     lignes, manquees = [], []
     for n, df in vols.items():
         if not (df.etiquette == "panne").any():
             continue
         cercle = ml.cercle_de(df)
-        par_canal = ml.alarmes(cercle, modele, seuil, combine=True)
+        par_canal = alarmes(cercle, modele, seuil, autoencodeur)
         alarme = pd.concat(par_canal.values(), axis=1).any(axis=1)
         panne = cercle.etiquette == "panne"
         if not (alarme & panne).any():
@@ -118,24 +130,38 @@ def afficher(t, manquees):
     print(erreurs[["log", "panne", "famille", "regles", "foret", "delai_s"]].to_string(index=False), "\n")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) not in (3, 5) or (len(sys.argv) == 5 and sys.argv[3] != "--test"):
-        sys.exit(__doc__)
-    vols = ds.charger(sys.argv[1])
-    if sys.argv[2].endswith(".csv"):
-        appr = ae.lire_roles(sys.argv[2])["apprentissage"]
-    else:
-        appr = [n for n in vols if n <= int(sys.argv[2])]
+def preparer_detecteur(vols, calibration, avec_ae):
+    """Isolation Forest (et autoencodeur avec --ae) du déclencheur, appris comme comparer_detecteurs.py."""
+    roles = ae.lire_roles(calibration) if calibration.endswith(".csv") else None
+    appr = roles["apprentissage"] if roles else [n for n in vols if n <= int(calibration)]
     modele, seuil, _ = ml.entrainer(vols, appr)
-    t, manquees = tableau(vols, modele, seuil)
+    autoencodeur = None
+    if avec_ae:
+        if roles is None:
+            sys.exit("--ae demande un fichier de rôles")
+        modele_ae, _ = ae.entrainer(vols, appr)
+        autoencodeur = (modele_ae, ae.fixer_seuil(modele_ae, vols, roles["validation"]))
+    return appr, modele, seuil, autoencodeur
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    avec_ae = "--ae" in args
+    if avec_ae:
+        args.remove("--ae")
+    if len(args) not in (2, 4) or (len(args) == 4 and args[2] != "--test"):
+        sys.exit(__doc__)
+    vols = ds.charger(args[0])
+    appr, modele, seuil, autoencodeur = preparer_detecteur(vols, args[1], avec_ae)
+    t, manquees = tableau(vols, modele, seuil, autoencodeur)
     X = entrees(t)
 
-    if len(sys.argv) == 5:
+    if len(args) == 4:
         # Test : forêt entraînée sur toutes les pannes du premier dossier, détecteur inchangé
         foret = nouvelle_foret().fit(X, t.famille)
-        test, manquees_test = tableau(ds.charger(sys.argv[4]), modele, seuil)
+        test, manquees_test = tableau(ds.charger(args[3]), modele, seuil, autoencodeur)
         test["foret"] = foret.predict(entrees(test)) if len(test) else []
-        print(f"Apprentissage : {len(t)} pannes de {sys.argv[1]} ; test : {sys.argv[4]}")
+        print(f"Apprentissage : {len(t)} pannes de {args[0]} ; test : {args[3]}")
         afficher(test, manquees_test)
         sys.exit(0)
 

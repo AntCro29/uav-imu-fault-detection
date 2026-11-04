@@ -207,6 +207,18 @@ sans attendre. Exemple :
 scripts/lancer_vol.sh leurre 6 20 2 --imus 3 --injection 128 --amplitude 100 --reponse boucle
 ```
 
+Avec `--vibration`, la boucle passe à sa version 2 : déclencheur autoencodeur OU Isolation Forest OU
+règle GPS, et aucun épisode commencé avant 10 s de cercle n'est classé. Ses fichiers se préparent par
+`python scripts/detecteur_en_ligne.py preparer data/jeu_boucle_v docs/roles_boucle_v.csv data/detecteur_vibration.joblib`
+puis `python scripts/classifieur_en_ligne.py preparer data/jeu_boucle_v docs/roles_boucle_v.csv data/classifieur_boucle_v.joblib --ae`
+(`classifieur.py ... --ae` pour la validation croisée). La trace contient en plus les colonnes
+`autoencodeur`, `AE + ML` et `score_ae` ; le journal donne les canaux qui ont déclenché chaque
+classification.
+
+```bash
+scripts/lancer_vol.sh leurre 6 20 2 --imus 3 --injection 128 --amplitude 100 --vibration --flux_optique --flux_permanent --reponse boucle
+```
+
 ### Archive des logs
 
 ArduPilot ne garde que 500 numéros de log (`LOG_MAX_FILES`, au plus 500) : après le log 500, il
