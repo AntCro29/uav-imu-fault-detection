@@ -30,6 +30,10 @@ rampe plus lent qu'environ 1,4 m/s, peut être accepté avant le dernier recours
 Validée sur les vols 180 à 209 (README) : GPS sain repris dans 6 cas sur 7, mais une rampe de
 1,67 m/s acceptée sur deux vents sur trois, car l'estimée dérivait dans le sens du leurre (la
 limite de 1,4 m/s supposait l'estimée exacte).
+
+Boucle complète (vol_auto.py --reponse boucle, 2026-11-02) : la règle « SP en premier » est
+désactivée (regle_sp=False, elle avait écarté le GPS pendant une dérive d'accéléromètre, vol 206) ;
+le GPS est écarté par la règle du fix, ou par ecarter() quand le classifieur donne la famille GPS.
 """
 import math
 from detecteur_adaptatif import PERSISTANCE
@@ -44,7 +48,8 @@ FIX_3D = 3
 
 
 class Recuperateur:
-    def __init__(self):
+    def __init__(self, regle_sp=True):
+        self.regle_sp = regle_sp   # False : seuls la règle du fix et ecarter() écartent le GPS
         self.etat = "normal"
         self.premiers = None     # canaux en alarme au début de l'épisode d'alarme en cours
         self.t_episode = None    # instant de début de cet épisode
@@ -70,11 +75,19 @@ class Recuperateur:
             self.cause = "pas de fix GPS 3D"
             if self.premiers is None:
                 self.indice_episode = indice - (PERSISTANCE - 1)
-        elif (self.premiers == {"SP"} and (fix or 0) >= FIX_3D
+        elif (self.regle_sp and self.premiers == {"SP"} and (fix or 0) >= FIX_3D
               and (self.t_retour is None or self.t_episode >= self.t_retour + REFRACTAIRE_S)):
             self.cause = "alarme sur SP en premier, fix GPS bon"
         else:
             return None
+        self.etat, self.t_ecart, self.t_coherent = "ecarte", t, None
+        return "ecarter"
+
+    def ecarter(self, t, cause, indice):
+        """Exclusion décidée hors de R3 (classifieur) ; `indice` = premier échantillon de l'épisode."""
+        if self.etat != "normal":
+            return None
+        self.cause, self.indice_episode = cause, indice
         self.etat, self.t_ecart, self.t_coherent = "ecarte", t, None
         return "ecarter"
 

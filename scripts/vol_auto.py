@@ -2,7 +2,7 @@
 
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
-                           [--reponse rien|natif|natif_trainee|r3] [--bruit R] [--vibration [gyro|acc]]
+                           [--reponse rien|natif|natif_trainee|r3|rimu|boucle] [--bruit R] [--vibration [gyro|acc]]
                            [--flux_optique] [--flux_permanent] [--imus 3] [--imu N]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
@@ -56,6 +56,15 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
          principal (EK3_PRIMARY, puis EK3_OPTIONS bit 1 ManualLaneSwitch, qui verrouille ce
          choix et désactive les bascules automatiques jusqu'à la fin du vol). Écarts du vote
          dans data/vote_<date>.csv, décision dans le journal.
+  boucle : boucle complète détection → classification → réponse (avec --imus 3 ; choix d'Antoine
+           du 2026-11-02) : détecteur, R3 (sans sa règle « SP en premier »), vote R-IMU et
+           classifieur en ligne (classifieur_en_ligne.py, data/classifieur_boucle.joblib). Le
+           vote bascule seul, comme rimu ; la perte du fix écarte le GPS, comme r3. Au premier
+           épisode d'alarme, 3 s plus tard, une seule décision pour tout le vol selon la famille :
+           GPS → R3 écarte le GPS (sauf si le vote a déjà désigné une IMU, ou si le GPS est déjà
+           écarté) ; accéléromètre ou gyroscope → aucune action sur le GPS (bascule du vote
+           confirmée, ou panne non isolée par le vote, signalée) ; magnétomètre → signalé. Les
+           épisodes suivants sont classés et écrits dans le journal, sans action.
 --bruit R : bruit de gyroscope des deux IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
 le décollage, même effet que le scénario bruit_gyro : radians(R) × gaz, donc nul moteurs
 arrêtés). Le commentaire du simulateur (AP_InertialSensor_SITL.cpp:235) donne 0,2 à 0,4 rad/s
@@ -105,6 +114,7 @@ from pymavlink import mavutil
 
 DEPOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FICHIER_DETECTEUR = os.path.join(DEPOT, "data", "detecteur_en_ligne.joblib")
+FICHIER_CLASSIFIEUR = os.path.join(DEPOT, "data", "classifieur_boucle.joblib")
 
 # 1° de latitude en m : LATLON_TO_M d'ArduPilot (AP_Math/definitions.h:52, m pour 1e-7 degré)
 M_PAR_DEGRE = 0.011131884502145034 * 1e7
@@ -167,7 +177,7 @@ arguments.add_argument("--amplitude", type=float, help="biais (m/s²) ou décala
 arguments.add_argument("--detecteur", action="store_true", help="fait tourner les détecteurs pendant le cercle")
 arguments.add_argument("--trainee", action="store_true", help="estimation du vent par la traînée (EK3_DRAG_*)")
 arguments.add_argument("--bascule", type=float, help="instant (s de cercle) de la bascule sur le jeu de sources sans GPS")
-arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3", "rimu"], default="rien",
+arguments.add_argument("--reponse", choices=["rien", "natif", "natif_trainee", "r3", "rimu", "boucle"], default="rien",
                        help="réponse à la panne")
 arguments.add_argument("--bruit", type=float, help="bruit de gyroscope pendant tout le vol (SIM_GYR*_RND)")
 arguments.add_argument("--vibration", nargs="?", const="toutes", choices=["toutes", "gyro", "acc"],
@@ -182,7 +192,7 @@ arguments.add_argument("--imu", type=int, choices=[1, 2, 3], help="panne d'IMU s
 args = arguments.parse_args()
 if args.flux_permanent and not args.flux_optique:
     arguments.error("--flux_permanent demande --flux_optique")
-if args.reponse == "r3":
+if args.reponse in ("r3", "boucle"):
     args.detecteur = args.trainee = True
 if len(args.vent) not in (0, 3):
     arguments.error("le vent demande trois valeurs : vitesse direction turbulence")
@@ -210,10 +220,10 @@ if panne is not None:
         panne["params"] = [f"{modele[1]}{args.imu}{modele[2]}"]
 elif args.amplitude is not None or args.injection != 120.0 or args.imu is not None:
     arguments.error("--injection, --amplitude et --imu sont sans objet pour un vol nominal")
-if args.bascule is not None and args.reponse == "r3":
-    arguments.error("--bascule et --reponse r3 s'excluent")
-if args.reponse == "rimu" and args.imus != 3:
-    arguments.error("--reponse rimu demande --imus 3")
+if args.bascule is not None and args.reponse in ("r3", "boucle"):
+    arguments.error(f"--bascule et --reponse {args.reponse} s'excluent")
+if args.reponse in ("rimu", "boucle") and args.imus != 3:
+    arguments.error(f"--reponse {args.reponse} demande --imus 3")
 if args.bascule is not None and (panne is not None or args.bascule + DUREE_BASCULE > CERCLE_NOMINAL):
     arguments.error(f"--bascule : vol nominal seulement, et T + {DUREE_BASCULE} s ≤ {CERCLE_NOMINAL} s")
 
@@ -233,6 +243,8 @@ alarmes = {}
 vote = trace_vote = None
 options_ek3 = None
 recup = None
+classif = None
+decision_boucle = None   # boucle : la seule décision du vol (famille, ou « GPS, règle du fix »)
 action = None       # décision de R3, exécutée par pomper() après le message qui l'a produite
 execution = False   # vrai pendant l'exécution d'une décision (pomper() y est appelé de nouveau)
 
@@ -275,12 +287,19 @@ if args.detecteur:
     chemin_trace = os.path.join(DEPOT, "data", f"en_ligne_{time.strftime('%Y%m%d-%H%M%S')}.csv")
     fichier_trace = open(chemin_trace, "w", newline="")
     trace = csv.writer(fichier_trace)
-    trace.writerow(["t_cercle_s", "SV", "SP", "SM", "gps_fix", "score_ml"] + enligne.NOMS + ["r3"])
+    trace.writerow(["t_cercle_s", "SV", "SP", "SM", "gps_fix", "score_ml"] + enligne.NOMS + ["r3", "SH", "famille"])
     journal(f"Détecteur en ligne chargé ({FICHIER_DETECTEUR}), trace : {chemin_trace}")
-if args.reponse == "r3":
+if args.reponse in ("r3", "boucle"):
     import recuperation
-    recup = recuperation.Recuperateur()
-if args.reponse == "rimu":
+    recup = recuperation.Recuperateur(regle_sp=args.reponse == "r3")
+if args.reponse == "boucle":
+    import joblib
+    import classifieur_en_ligne
+    if joblib.load(FICHIER_CLASSIFIEUR)["seuil_ml"] != joblib.load(FICHIER_DETECTEUR)["seuil_ml"]:
+        sys.exit("Classifieur et détecteur appris sur des données différentes")
+    classif = classifieur_en_ligne.charger(FICHIER_CLASSIFIEUR)
+    journal(f"Classifieur en ligne chargé ({FICHIER_CLASSIFIEUR})")
+if args.reponse in ("rimu", "boucle"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import vote_imu
     vote = vote_imu.Vote()
@@ -338,19 +357,25 @@ def traiter(msg):
         etat["ack_source"] = msg.result
     elif genre == "EKF_STATUS_REPORT" and detecteur is not None and en_cercle:
         v = {c: enligne.quantifier(getattr(msg, champ)) for c, champ in
-             (("SV", "velocity_variance"), ("SP", "pos_horiz_variance"), ("SM", "compass_variance"))}
+             (("SV", "velocity_variance"), ("SP", "pos_horiz_variance"), ("SH", "pos_vert_variance"),
+              ("SM", "compass_variance"))}
         if recup is not None and recup.etat != "normal":
             # GPS écarté : innovations figées par l'EKF, le détecteur n'est pas alimenté (R3 v2)
             trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"], ""]
-                           + [""] * len(enligne.NOMS) + [recup.etat])
+                           + [""] * len(enligne.NOMS) + [recup.etat, v["SH"], ""])
             return
         etats = detecteur.ajouter(v["SV"], v["SP"], v["SM"], etat["fix"])
         if recup is not None:
             action = action or recup.detecteur(time.monotonic(), detecteur.n - 1, detecteur.canaux,
                                                detecteur.alarme_gps, etat["fix"])
+        classe = None
+        if classif is not None:
+            classe = classif.ajouter(v["SV"], v["SP"], v["SH"], v["SM"], etat["fix"], etat["sats"], detecteur)
+            if classe is not None:
+                decider(*classe)
         trace.writerow([f"{time.monotonic() - t_cercle:.2f}", v["SV"], v["SP"], v["SM"], etat["fix"],
                         f"{detecteur.score:.4f}"] + [int(etats[n]) for n in enligne.NOMS]
-                       + [recup.etat if recup is not None else ""])
+                       + [recup.etat if recup is not None else "", v["SH"], classe[0] if classe else ""])
         for nom, actif in etats.items():
             if actif != alarmes[nom]:
                 texte = "ALARME" if actif else "fin d'alarme"
@@ -363,6 +388,35 @@ def traiter(msg):
         if recup is not None and en_cercle and etat["lat_est"] is not None:
             action = action or recup.gps(time.monotonic(), msg.fix_type, msg.lat / 1e7, msg.lon / 1e7,
                                          etat["lat_est"], etat["lon_est"])
+
+
+def decider(famille, k, variables):
+    """Boucle : réponse à la famille donnée par le classifieur pour l'épisode commencé à l'échantillon k."""
+    global action, decision_boucle
+    delai = (detecteur.n - 1 - k) / 10
+    if decision_boucle is not None:
+        journal(f"BOUCLE : épisode classé {famille} (alarme {delai:.1f} s plus tôt), sans action : "
+                f"décision déjà prise ({decision_boucle})")
+        return
+    decision_boucle = famille
+    if famille == "GPS":
+        if recup.etat != "normal":
+            journal(f"BOUCLE : famille GPS, GPS déjà écarté ({recup.cause})")
+        elif vote.fautive is not None:
+            journal(f"BOUCLE : famille GPS, mais le vote a désigné l'IMU {vote.fautive[0]} : GPS gardé")
+        else:
+            journal(f"BOUCLE : famille GPS (alarme {delai:.1f} s plus tôt) : GPS écarté")
+            action = action or recup.ecarter(time.monotonic(), "classifieur : famille GPS",
+                                             max(0, k - (recuperation.PERSISTANCE - 1)))
+    elif famille in ("accéléro", "gyro"):
+        if vote.fautive is not None:
+            journal(f"BOUCLE : famille {famille}, confirmée par le vote (IMU {vote.fautive[0]}, "
+                    f"{vote.fautive[1]}) ; GPS gardé")
+        else:
+            journal(f"BOUCLE : famille {famille}, panne non isolée par le vote (probablement commune "
+                    f"aux IMU) : aucune action, GPS gardé")
+    else:
+        journal(f"BOUCLE : famille {famille} : pas de réponse prévue, aucune action")
 
 
 def pomper(duree, jusqua=None):
@@ -442,12 +496,16 @@ def basculer(jeu):
 
 def executer():
     """Exécute la décision de R3, une seule à la fois (les commandes rappellent pomper())."""
-    global action, execution
+    global action, execution, decision_boucle
     decision, action, execution = action, None, True
     if decision == "ecarter":
         journal(f"R3 : GPS écarté ({recup.cause}) ; détecteur suspendu, "
                 f"{detecteur.n - recup.indice_episode} échantillon(s) de l'épisode retirés")
         detecteur.suspendre(recup.indice_episode)
+        if classif is not None:
+            classif.suspendre(recup.indice_episode)
+            if decision_boucle is None:
+                decision_boucle = "GPS, règle du fix"
         alarmes.update({nom: False for nom in alarmes})
         basculer(2)
     elif decision == "revenir":
@@ -529,9 +587,9 @@ if args.reponse == "natif_trainee":
 elif args.trainee:
     regler(TRAINEE)
     regler({"FS_DR_ENABLE": 0})
-if args.reponse == "r3":
+if args.reponse in ("r3", "boucle"):
     regler({"FS_DR_TIMEOUT": DUREE_ESTIME_S})
-if args.bascule is not None or args.reponse == "r3":
+if args.bascule is not None or args.reponse in ("r3", "boucle"):
     regler(SOURCES_SANS_GPS)
 if args.flux_permanent:
     regler(FLUX_PERMANENT)
