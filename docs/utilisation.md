@@ -43,6 +43,12 @@ ce dépôt, dans `~/drone/ardupilot`.
   première alarme du détecteur « Isolation Forest + adaptatif » ; règles écrites à la main et
   forêt aléatoire, évaluées en laissant de côté un vol à la fois. Avec `--test`, la forêt apprise
   sur toutes les pannes du premier dossier classe celles du dossier de test.
+- `scripts/classifieur_en_ligne.py preparer <dossier> <dernier_log_detecteur> <fichier.joblib>` puis
+  `rejouer <classifieur.joblib> <detecteur.joblib> <dossier_test> [log ...]` : le même classifieur,
+  un échantillon à la fois, pour le vol (`vol_auto.py --reponse boucle`) ; le rejeu vérifie qu'il
+  donne la même famille, au même échantillon et avec les mêmes variables que l'analyse après coup.
+  Fichier utilisé en vol : `data/classifieur_boucle.joblib`, préparé par
+  `python scripts/classifieur_en_ligne.py preparer data/jeu_boucle 49 data/classifieur_boucle.joblib`.
 - `scripts/tracer_detecteurs.py <dossier_jeu_donnees> <dernier_log_calibration> <log> <image.png> [titre]` :
   un vol avec ce que voient les quatre détecteurs (innovations et seuils, score de l'Isolation
   Forest, alarmes). Résultat sur le vol 104 : `docs/figures/test_derive_vol104.png`.
@@ -73,6 +79,12 @@ ce dépôt, dans `~/drone/ardupilot`.
   (IMU déclarée par le vote et délai, changements de cœur principal, erreurs d'attitude et de
   position vraies du cœur principal avant, pendant et après la panne). Exemple :
   `python scripts/evaluer_rimu.py 427 data/journal_*20261102-1[4-9]*.txt`.
+- `scripts/verifier_boucle.py [--depuis AAAAMMJJ-HHMMSS] <logs> <journal> [...]` et
+  `scripts/evaluer_boucle.py` (mêmes arguments) : déroulé puis résultats d'une campagne de la
+  boucle complète (décision, IMU déclarée, exclusions et retours au GPS, dernier recours,
+  conformité au résultat attendu, erreurs vraies, temps dans la zone). `<logs>` donne les numéros
+  dans l'ordre des vols, en plages (la numérotation d'ArduPilot repart à 1 après 500). Exemple :
+  `python scripts/evaluer_boucle.py --depuis 20261103-182500 459-500,1-6 data/journal_*_2026110[34]-*.txt`.
 - `scripts/comparer_reponses.py <image.png> <titre> <log:étiquette> [...]` : plusieurs vols
   d'une même panne, une ligne par réponse (trajectoire, positions vraie et estimée en fonction du
   temps, erreur de navigation, décisions de R3 et d'ArduPilot). Résultats :
@@ -183,6 +195,20 @@ force l'autre cœur principal jusqu'à la fin du vol. Exemple :
 # biais de 1,0 m/s² sur l'IMU 1 seule, vent de 7 m/s venant de 190°, réponse R-IMU
 scripts/lancer_vol.sh biais 7 190 2.5 --imus 3 --imu 1 --injection 128 --amplitude 1.0 --reponse rimu
 ```
+
+`--reponse boucle` (avec `--imus 3`) fait tourner ensemble le détecteur, le classifieur en vol, le
+vote R-IMU et R3 sans sa règle « SP en premier » : 3 s après la première alarme, la famille de la
+panne décide une fois pour tout le vol (GPS → GPS écarté, sauf si le vote a déjà désigné une IMU ;
+accéléromètre ou gyroscope → GPS gardé ; magnétomètre → signalé). La perte du fix écarte le GPS
+sans attendre. Exemple :
+
+```bash
+# leurre GPS de 100 m, vent de 6 m/s venant de 20°, boucle complète
+scripts/lancer_vol.sh leurre 6 20 2 --imus 3 --injection 128 --amplitude 100 --reponse boucle
+```
+
+ArduPilot ne garde que 500 numéros de log (`LOG_MAX_FILES`) : après le log 500, il repart à 1 en
+écrasant les anciens fichiers. Sauvegarder les logs avant d'y arriver.
 
 ### Vol manuel
 

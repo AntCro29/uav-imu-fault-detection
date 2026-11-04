@@ -60,6 +60,7 @@ optique (les deux biais d'accéléromètre de 1,0 m/s² pris pour le gyroscope).
 - [Pourquoi les petites pannes d'IMU deviennent invisibles sous vibration (vols 329 à 340)](#pourquoi-les-petites-pannes-dimu-deviennent-invisibles-sous-vibration-vols-329-à-340)
 - [Classification de la famille de panne (vols 341 à 376)](#classification-de-la-famille-de-panne-vols-341-à-376)
 - [Récupération des pannes d'IMU : vote entre trois IMU (vols 389 à 440)](#récupération-des-pannes-dimu--vote-entre-trois-imu-vols-389-à-440)
+- [Boucle complète détection → classification → réponse (vols 441 à 492)](#boucle-complète-détection--classification--réponse-vols-441-à-492)
 
 ## Premier détecteur à seuil (vols 5 à 11)
 
@@ -1125,3 +1126,141 @@ vibration ; une seule IMU en panne à la fois, la panne commune à plusieurs IMU
 précédents) n'est pas reconnaissable par un vote ; la décision est définitive jusqu'à la fin du vol
 (pas de retour sur l'IMU réparée) ; le vote ne s'appuie que sur l'écart moyen sur 2 s, une panne
 plus petite que le bruit entre IMU sous vibration (de l'ordre de 0,2 m/s² et 0,008 rad/s) lui échappe.
+
+## Boucle complète détection → classification → réponse (vols 441 à 492)
+
+Jusqu'ici, chaque réponse était choisie à la main pour la panne injectée : R3 pour le GPS, R-IMU
+pour une IMU. La boucle (`vol_auto.py --reponse boucle`, avec `--imus 3` ; choix d'Antoine du
+2026-11-02 : d'abord sans vibration, la version sous vibration ensuite) laisse l'alarme choisir.
+
+**Conception.** Tout tourne en même temps pendant le vol :
+
+- le détecteur en vol (`detecteur_en_ligne.py`, colonne « ML + adaptatif » : Isolation Forest OU
+  seuil adaptatif k = 6 OU règle GPS) ;
+- le classifieur en vol (`classifieur_en_ligne.py`) : au début d'un épisode d'alarme, il attend
+  3 s (30 échantillons) puis calcule exactement les variables de `classifieur.py` et donne la
+  famille ;
+- le vote R-IMU, qui bascule seul comme `--reponse rimu` ;
+- l'automate de R3, **sans sa règle « SP en premier »** (celle qui avait exclu le GPS à tort sur
+  la dérive du vol 206) : la perte du fix écarte toujours le GPS, mais pour le reste c'est le
+  classifieur qui décide (`Recuperateur.ecarter`).
+
+Une seule décision par vol, prise sur le premier épisode (option choisie par Antoine) :
+
+| Famille | Action |
+|---|---|
+| GPS | R3 écarte le GPS, sauf si le vote a déjà désigné une IMU (GPS gardé) ou si le GPS est déjà écarté |
+| accéléromètre, gyroscope | aucune action sur le GPS ; bascule du vote « confirmée », ou panne « non isolée par le vote » signalée dans le journal |
+| magnétomètre | signalé, aucune action |
+
+Les épisodes suivants sont seulement écrits dans le journal. La règle « vote prioritaire sur une
+famille GPS » a été ajoutée pendant le câblage, puis validée par Antoine avant le calcul des
+résultats.
+
+**Vérification hors ligne.** Le classifieur en vol, rejoué échantillon par échantillon sur les
+CSV, donne la même famille, au même échantillon et avec les mêmes variables que l'analyse après
+coup : 0 écart sur les 18 vols de `jeu_classif_s` et sur les 60 vols de `jeu_test` (logs 79 à 138),
+aucune classification sur les nominaux.
+
+**Vols pilotes (vols 441 à 443, logs 455 à 457 ; 6 m/s venant de 20°, turbulence 2, injection à
+128 s).** Dérive commune de 0,5 m/s² : classée accéléromètre, « non isolée par le vote », GPS gardé
+(conforme). Biais de 1,0 m/s² sur l'IMU 1 : vote à +1,1 s, famille accéléromètre « confirmée »
+(conforme). **Leurre de 100 m : classé accéléromètre, GPS gardé (raté).** Cause : la forêt avait
+été entraînée sur `jeu_test`, qui ne contient que des coupures GPS, aucun leurre ni brouillage ;
+les règles à la main classent d'ailleurs tous les leurres en accéléromètre, puisque le fix reste
+3D.
+
+**Réentraînement (décision d'Antoine).** 25 vols anciens sans vibration et sans réponse, sous
+6 m/s : 7 leurres de 100 m en échelon, 7 rampes jusqu'à 100 m, 4 rampes jusqu'à 30 m,
+7 brouillages (logs 147, 151, 155, 164 à 184 et 194 à 214 un sur deux, retrouvés par l'heure de
+création des `.BIN`), ajoutés à `jeu_test` dans `data/jeu_boucle/`. Le détecteur ne change pas
+(logs 19 à 49). Validation croisée en laissant un vol de côté :
+
+| | avant (62 pannes) | après (87 pannes) |
+|---|---|---|
+| Forêt aléatoire | 56 / 62 | **83 / 87** |
+| accéléromètre / gyroscope / GPS / magnétomètre | 34/36, 7/11, 8/8, 7/7 | 35/36, 8/11, 33/33, 7/7 |
+| Règles à la main | 50 / 62 | 57 / 87 (18 leurres sur 18 pris pour l'accéléromètre) |
+
+Rejeu des 25 vols : 0 écart. Forêt enregistrée dans `data/classifieur_boucle.joblib`. Pilote
+leurre refait (vol 444, log 458) : classé GPS, GPS écarté à +3,4 s, erreur de position vraie
+0,2 m à l'exclusion, puis 45 m à +57 s et 72 m à +87 s (navigation à l'estime avec la traînée ;
+la plage de R3 v2 était de 25 à 77 m à +90 s). Limite de ce réentraînement : les 25 vols avaient
+deux IMU et pas de traînée, la boucle vole avec trois IMU et la traînée.
+
+**Campagne de test (vols 445 à 492, 2026-11-03, composition validée et figée avant le
+lancement).** Trois IMU, traînée, sans vibration, vent 6 m/s turbulence 2 venant de 70°, 175° et
+305° (directions jamais utilisées), injection à 128, 135 et 143 s. Huit scénarios sous chaque vent,
+chacun volé avec la boucle puis avec la réponse choisie à la main : biais de 1,0 m/s² sur l'IMU 1,
+biais de gyroscope de 0,02 rad/s sur l'IMU 2, dérive commune jusqu'à 0,5 m/s² (R-IMU) ; leurre de
+100 m en échelon, en rampe, brouillage, magnétomètre, nominal (R3). Résultat attendu de chaque
+scénario fixé dans `evaluer_boucle.py` avant le calcul.
+
+**Numérotation.** Après le log 500, ArduPilot est reparti au log 1 (`LOG_MAX_FILES` ≤ 500,
+`AP_Logger.cpp:198-205`, `AP_Logger_File.cpp:805-806`) : les vols 487 à 492 sont les logs 1 à 6,
+qui ont écrasé six logs de septembre antérieurs au projet (non utilisés, perdus). Tous les logs
+ont été copiés hors du dossier d'ArduPilot ; avant un nouveau vol, il faut empêcher la rotation
+d'atteindre les logs 7 et suivants.
+
+**Déroulé** (`verifier_boucle.py`, sans lire aucun résultat) : 48 / 48 conformes (trois IMU, vent,
+injection, retrait à +60 s, rampes de 60 pas, aucun trou, altitude vraie en cercle ≥ 14,4 m).
+Vols 454, 455 et 456 (rampe avec R3, brouillage avec la boucle et avec R3, vent de 70°) : RTL à
++121 s par le dernier recours de R3 ; 455 et 456 non posés au bout de 900 s (encore à 15 m, à 455
+et 955 m du départ, `vol_auto.py` sort en erreur).
+
+**Résultats** (`evaluer_boucle.py`, une seule exécution, aucun réglage changé ensuite). Décision
+conforme au résultat attendu sur les 48 vols : aucune exclusion du GPS à tort, aucune action sur
+les 6 nominaux, bonne IMU désignée sur les 12 vols à panne d'IMU isolable.
+
+Pannes d'IMU et magnétomètre (erreur d'attitude max du cœur principal, pendant la panne / 90 s
+après ; erreur de position ≤ 0,5 m partout) :
+
+| Panne | Boucle | Réponse choisie à la main |
+|---|---|---|
+| Biais 1,0 m/s², IMU 1 | IMU 0 désignée à +1,1 s (×3) ; 0,22-0,38° / 0,25-0,27° | R-IMU : +1,1 à 1,2 s ; 0,22-0,35° / 0,26-0,27° |
+| Gyroscope 0,02 rad/s, IMU 2 | IMU 1 désignée à +1,5 à 1,6 s ; 0,25-0,27° / 0,18-0,22° | R-IMU : +1,6 s ; 0,23-0,25° / 0,19-0,22° |
+| Dérive commune 0,5 m/s² | aucune IMU, GPS gardé ; 1,92-2,02° / 1,21-2,02° | R-IMU : idem ; 1,90-2,06° / 1,29-2,01° |
+| Magnétomètre | aucune action ; 2,02-2,45° / 1,08-1,78° | R3 : aucune action ; 1,97-2,43° / 1,12-1,77° |
+
+Pannes GPS (erreur de position vraie max du cœur principal, pendant / 90 s après ; part du temps
+dans la zone de 60 m, de l'injection à +150 s) :
+
+| Panne, vent | Boucle | R3 |
+|---|---|---|
+| Leurre échelon, 70° | écarté +3,5 s, repris +90 s ; 55 / 59 m ; 85 % | +0,5 s, +90 s ; 30 / 47 m ; 96 % |
+| Leurre échelon, 175° | +3,5 s, +90 s ; 19 / 22 m ; 100 % | +0,6 s, +90,5 s ; 21 / 24 m ; 100 % |
+| Leurre échelon, 305° | +3,6 s, +90,5 s ; 20 / 35 m ; 95 % | +0,6 s, +90 s ; 3 / 20 m ; 100 % |
+| Rampe 100 m, 70° | +3,4 s, repris +34 s ; 99 / 99 m ; 72 % | +0,7 s, dernier recours +121 s ; 69 / 1 133 m ; 37 % |
+| Rampe 100 m, 175° | +3,5 s, repris +34 s ; 98 / 99 m ; 81 % | +0,5 s, repris +31 s ; 98 / 99 m ; 81 % |
+| Rampe 100 m, 305° | +3,4 s, repris +34 s ; 98 / 99 m ; 70 % | +0,5 s, repris +31 s ; 98 / 99 m ; 73 % |
+| Brouillage, 70° | fix +0,7 s, dernier recours +121 s ; 71 / 1 051 m ; 35 % | +0,9 s, dernier recours +121 s ; 58 / 360 m ; 47 % |
+| Brouillage, 175° | +0,8 s, repris +90 s ; 20 / 28 m ; 100 % | +0,6 s, +90 s ; 24 / 29 m ; 100 % |
+| Brouillage, 305° | +0,7 s, repris +90 s ; 20 / 38 m ; 94 % | +0,6 s, +90 s ; 10 / 24 m ; 100 % |
+
+Familles données par le classifieur dans les 24 vols de la boucle : 12 justes sur 15 classés
+(leurres et rampes 6 / 6, magnétomètre 3 / 3, dérive 2 / 3, biais 1 / 3). Les trois erreurs n'ont
+pas changé l'action : les biais des vols 445 et 461, pris pour le GPS, ont été rattrapés par la
+règle « vote prioritaire » (le vote avait désigné l'IMU 0 à +1,1 s) ; la dérive du vol 449, prise
+pour le gyroscope, mène à la même action que l'accéléromètre. Neuf vols sans classification :
+gyroscope (le vote bascule à +1,5 s et le détecteur ne déclenche jamais, le cœur 0 principal
+n'utilisant pas l'IMU 1), brouillage (la perte du fix écarte le GPS au même échantillon que
+l'alarme et suspend le détecteur), nominaux.
+
+Ce qu'il faut en retenir :
+
+- **Sans connaître la panne, la boucle fait ce que faisait la réponse choisie à la main, sur les
+  24 configurations.** Sur les pannes d'IMU, le magnétomètre et le brouillage, les chiffres sont
+  identiques au bruit près.
+- Sur les leurres en échelon, le GPS est écarté 3 s plus tard (attente du classifieur). L'erreur
+  à l'exclusion reste de 0,2 m (vol 444 : l'EKF avait rejeté le leurre entre-temps) ; ensuite les
+  écarts entre boucle et R3 vont dans les deux sens (55 contre 30 m à 70°, 19 contre 21 m à
+  175°) : ils viennent de la navigation à l'estime, pas de la décision. Un vol par vent.
+- Les faiblesses de R3 restent : sur la rampe, le GPS est repris à +31 à +34 s alors que le leurre
+  dure, et l'estimée le suit jusqu'à 99 m ; sous le vent de 70°, l'estime dérive trop pour
+  reprendre le GPS, et le dernier recours (RTL à l'estime) laisse le drone en l'air loin du départ.
+- La dérive commune a été comparée à R-IMU, pas à R3 seul : ce test ne montre pas que la boucle
+  évite l'exclusion à tort du vol 206, seulement qu'elle ne la commet pas sur ces trois vols.
+
+Limites : un vol par configuration, un seul niveau de vent, sans vibration ; classifieur réentraîné
+sur des vols à deux IMU sans traînée ; une seule décision par vol (une seconde panne ne serait que
+signalée).

@@ -2,7 +2,7 @@
 
 Projet personnel, en cours : détecter automatiquement les pannes de capteurs d'un drone
 multirotor à partir de ce que voit son filtre de navigation, puis réagir sans abandonner la
-mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 428 vols, tous
+mission. Tout est fait en simulation (ArduPilot SITL, ArduCopter), sur 480 vols, tous
 automatisés sauf les quatre premiers, qui ont servi à se familiariser avec l'interface.
 
 Titre visé : *Machine Learning Based IMU Fault Detection and Recovery for Autonomous UAVs*.
@@ -36,6 +36,7 @@ flowchart LR
     D --> G[Classifieur<br/>famille de la panne]
     G --> E[Réponse R3<br/>écarter le GPS,<br/>continuer la mission]
     A --> H[Réponse R-IMU<br/>vote entre trois IMU,<br/>cœur EKF sain forcé]
+    G --> H
     E --> F[Mesure sur la vérité<br/>du simulateur]
     H --> F
 ```
@@ -61,7 +62,9 @@ flowchart LR
 6. **Une réponse aux pannes d'IMU, R-IMU** (`scripts/vote_imu.py`) : avec trois IMU simulées,
    un vote désigne celle qui s'écarte des deux autres, et le drone est forcé sur le cœur EKF qui
    n'utilise pas cette IMU.
-7. **Une mesure honnête** : l'erreur de navigation est calculée contre la **position vraie** du
+7. **La boucle complète** (`vol_auto.py --reponse boucle`) : en vol, l'alarme déclenche le
+   classifieur, et la famille de la panne choisit seule la réponse (R3, R-IMU ou aucune action).
+8. **Une mesure honnête** : l'erreur de navigation est calculée contre la **position vraie** du
    simulateur, que le drone ne connaît pas.
 
 Règles suivies pour chaque résultat : les réglages sont figés **avant** de regarder les vols de
@@ -71,7 +74,7 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 
 | Étape | État | Résultat principal |
 |---|---|---|
-| Banc de vols automatique | fait | 428 vols, protocole identique depuis le vol 5 |
+| Banc de vols automatique | fait | 480 vols, protocole identique depuis le vol 5 |
 | Détection, IMU simulée idéale | fait | test sur 60 vols neufs : jusqu'à 41 pannes sur 42, aucune fausse alarme |
 | Détection en vol (temps réel) | fait | mêmes alarmes en vol qu'après coup, 0 écart sur 60 vols rejoués |
 | Récupération des pannes GPS (R3) | fait, 3 versions | GPS sain repris 6 fois sur 7 ; échoue encore sur un leurre lent |
@@ -81,8 +84,9 @@ test, ces vols n'ont servi à aucun réglage, et le test n'est exécuté qu'une 
 | Comprendre pourquoi les petites pannes d'IMU deviennent invisibles | fait | la vibration (gyroscopes comme accéléromètres) noie la panne dans le bruit ; l'EKF ne s'en protège pas |
 | Classification de la famille de panne | fait | test sur 36 vols neufs : 18 sur 18 sans vibration, 14 sur 16 sous vibration |
 | Récupération des pannes d'IMU (R-IMU) | fait | test sur 28 vols neufs : bonne IMU désignée 12 fois sur 12, aucune bascule à tort ; erreur d'attitude après la panne ramenée sous 1° |
-| Boucle complète détection → classification → réponse | **en cours** | |
-| R3 guidé par le type de panne plutôt que par une règle | à faire | |
+| Boucle complète détection → classification → réponse, sans vibration | fait | test sur 48 vols neufs : bonne réponse 24 fois sur 24 sans connaître la panne, comme la réponse choisie à la main |
+| Boucle complète sous vibration | à faire | |
+| R3 guidé par le type de panne plutôt que par une règle | en partie (boucle) | reste à juger le GPS pendant l'exclusion |
 
 ## Résultats principaux
 
@@ -233,6 +237,40 @@ les dérives lentes. L'erreur qui reste pendant la panne s'accumule avant la bas
 position, elle, reste sous 1,3 m avec ou sans réponse : le GPS la corrige. Un vol par
 configuration ; détail dans [`docs/demarche.md`](docs/demarche.md).
 
+### 7. La boucle complète : l'alarme choisit elle-même la réponse
+
+En vol, la première alarme du détecteur (Isolation Forest ou seuil adaptatif) déclenche le
+classifieur. 3 s plus tard, la famille de la panne décide, une seule fois pour tout le vol :
+GPS → R3 écarte le GPS ; accéléromètre ou gyroscope → le GPS est gardé, et le vote R-IMU bascule de
+lui-même s'il isole une IMU ; magnétomètre → signalé, sans action. Deux règles encadrent la forêt :
+la perte du fix écarte le GPS sans attendre, et une famille « GPS » est ignorée si le vote a déjà
+désigné une IMU. Un vol pilote a montré que la forêt n'avait jamais vu de leurre : elle a été
+réentraînée, avant le test, avec 25 vols anciens de leurre et de brouillage.
+
+Testée une fois sur 48 vols neufs (trois IMU, sans vibration, vent de 6 m/s venant de trois
+directions jamais vues), chaque panne volée avec la boucle puis avec la réponse choisie à la main
+pour cette panne (R-IMU pour une IMU, R3 sinon) :
+
+| Panne (3 vols chacune) | Boucle | Réponse choisie à la main |
+|---|---|---|
+| Biais d'accéléromètre, une IMU | IMU désignée en 1,1 s, GPS gardé ; attitude ≤ 0,38° | identique (R-IMU) |
+| Biais de gyroscope, une IMU | IMU désignée en 1,5 à 1,6 s ; attitude ≤ 0,27° | identique (R-IMU) |
+| Dérive commune aux trois IMU | aucune action | identique (R-IMU) |
+| Leurre de 100 m en échelon | GPS écarté à +3,5 s ; erreur de position max 22 à 59 m | R3 : +0,5 s ; 20 à 47 m |
+| Leurre en rampe jusqu'à 100 m | GPS écarté à +3,4 s, mais repris à +34 s alors que le leurre dure : 99 m | R3 : même reprise 2 fois, dernier recours 1 fois |
+| Brouillage | GPS écarté à la perte du fix (+0,7 s), repris à +90 s 2 fois ; dernier recours 1 fois | identique (R3) |
+| Magnétomètre ; vol normal | aucune action | identique (R3) |
+
+**La boucle fait la bonne réponse 24 fois sur 24 sans savoir quelle panne a été injectée**, comme
+la réponse choisie à la main, sans exclusion du GPS à tort ni action sur les vols normaux. Le
+classifieur donne la bonne famille 12 fois sur 15 ; ses trois erreurs (deux biais d'accéléromètre
+pris pour le GPS, une dérive prise pour le gyroscope) n'ont rien changé, rattrapées par le vote ou
+sans conséquence. Le prix est un GPS écarté 3 s plus tard sur un leurre, sans effet net sur ces
+trois vols. La boucle ne corrige pas les faiblesses de R3 : la rampe lente et, sous le vent de
+70°, la navigation à l'estime qui finit en dernier recours (drone non posé, à plusieurs centaines
+de mètres). La dérive a été comparée à R-IMU, pas à R3 seul : ce test ne dit pas si la boucle
+évite l'exclusion à tort de R3 sur ce cas (vol 206), seulement qu'elle ne la commet pas ici.
+
 ## Limites
 
 - Tout est simulé. Le modèle de vibration du simulateur (une oscillation par moteur) et le flux
@@ -243,16 +281,15 @@ configuration ; détail dans [`docs/demarche.md`](docs/demarche.md).
   l'accéléromètre bloqué) ; R-IMU traite l'autre cas, une seule IMU en panne, et ne peut rien
   contre une panne commune. Sa décision est définitive jusqu'à la fin du vol.
 - Les leurres GPS sont simplifiés : la position est décalée, pas la vitesse.
+- La boucle n'est testée que sans vibration. Son classifieur a appris les leurres sur des vols à
+  deux IMU et sans modèle de traînée, alors qu'elle vole avec trois IMU et la traînée.
 - Une seule mission (le cercle), un seul type de drone (le quadricoptère du simulateur).
 
 ## Prochaines étapes
 
-1. **Boucler détection → classification → réponse** (en cours) : en vol, l'alarme déclenche le
-   classifieur, et sa famille choisit la réponse (R3 pour le GPS, R-IMU pour une IMU) ; puis une
-   vidéo de démonstration.
-2. **Guider R3 par la famille de la panne** plutôt que par une règle fixe : distinguer un leurre d'une
-   dérive d'accéléromètre avant d'écarter le GPS, et juger le GPS pendant l'exclusion autrement
-   qu'en le comparant à une estimée qui dérive.
+1. **La boucle sous vibration** (déclenchée par l'autoencodeur), puis une vidéo de démonstration.
+2. **Juger le GPS pendant l'exclusion** autrement qu'en le comparant à une estimée qui dérive : c'est
+   ce qui fait reprendre un leurre lent trop tôt, avec ou sans la boucle.
 3. Ensuite : détecter les petites pannes d'IMU sous vibration en intégrant leur effet dans le
    temps ; fixer le seuil de l'autoencodeur sur davantage de vols ; vérifier le réalisme de la
    dérive à l'estime sous vibration ; comprendre l'exclusion à tort du vol 267 ; traiter la phase qui suit le retrait
@@ -263,7 +300,7 @@ configuration ; détail dans [`docs/demarche.md`](docs/demarche.md).
 - [`docs/demarche.md`](docs/demarche.md) : la démarche complète, étape par étape et dans l'ordre
   chronologique, avec chaque protocole, chaque chiffre, les erreurs rencontrées et leurs
   corrections.
-- [`docs/vols.md`](docs/vols.md) : la liste des 428 vols et leur numérotation.
+- [`docs/vols.md`](docs/vols.md) : la liste des 480 vols et leur numérotation.
 - [`docs/utilisation.md`](docs/utilisation.md) : le rôle de chaque script, comment relancer un vol
   (automatique ou manuel) et analyser un log.
 
@@ -273,10 +310,12 @@ configuration ; détail dans [`docs/demarche.md`](docs/demarche.md).
   (`construire_jeu_donnees.py`), détecteurs (`detecteur_seuil.py`, `detecteur_adaptatif.py`,
   `detecteur_ml.py`, `detecteur_ae.py`, `detecteur_en_ligne.py`), classifieur (`classifieur.py`),
   comparaisons (`comparer_detecteurs.py`), récupération GPS (`recuperation.py`, `erreur_navigation.py`),
-  récupération IMU (`vote_imu.py`, `trois_imu.parm`, `evaluer_rimu.py`) et figures.
+  récupération IMU (`vote_imu.py`, `trois_imu.parm`, `evaluer_rimu.py`), boucle complète
+  (`classifieur_en_ligne.py`, `evaluer_boucle.py`) et figures.
 - `docs/` : documentation détaillée, figures, rôle des vols de la dernière campagne.
 - `data/` (non versionné) : jeux de données régénérables et journaux de vol. Les logs `.BIN`
-  restent dans le dossier d'ArduPilot.
+  restent dans le dossier d'ArduPilot (numérotation qui repart à 1 après 500 : voir
+  [`docs/vols.md`](docs/vols.md)).
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09), cloné hors de ce dépôt. Python avec
 pymavlink, pandas, matplotlib et scikit-learn (`requirements.txt`).

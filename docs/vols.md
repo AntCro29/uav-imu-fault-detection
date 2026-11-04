@@ -9,9 +9,13 @@ Numérotation : les vols manuels 1 à 4 sont les logs ArduPilot 13 à 16 ; à pa
 numéro du log = numéro du vol + 14 (vol 5 = `00000019.BIN`). Détail de chaque campagne dans
 [demarche.md](demarche.md).
 
-Quatre cent vingt-huit vols ont été réalisés en SITL (ArduCopter, vol en cercle), numérotés de 1 à
-440 : les numéros 377 à 388 correspondent à des tentatives sans décollage, dont les logs ont été
-supprimés.
+Quatre cent quatre-vingts vols ont été réalisés en SITL (ArduCopter, vol en cercle), numérotés de 1
+à 492 : les numéros 377 à 388 correspondent à des tentatives sans décollage, dont les logs ont été
+supprimés. Le numéro de vol vaut le numéro du log ArduPilot moins 14, jusqu'au vol 486 (log 500).
+ArduPilot ne garde que 500 numéros de log (`LOG_MAX_FILES`, `AP_Logger.cpp:198-205`) et repart
+ensuite à 1 en écrasant les anciens fichiers : les vols 487 à 492 sont les logs 1 à 6, écrits le
+2026-11-03 par-dessus six logs de septembre antérieurs au projet (perdus ; aucun n'était utilisé).
+Une copie de tous les logs est gardée hors du dossier d'ArduPilot.
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
@@ -72,9 +76,11 @@ supprimés.
 | 401 à 410 | automatique | Calibration du vote R-IMU, nominaux à trois IMU : sans vent, 3 m/s venant de 100° (turbulence 1), 6 m/s de 220° (2), 7,5 m/s de 300° (2,5), 9 m/s de 160° (3), sans vibration (vols 401 à 405) puis avec vibration et flux optique permanent (vols 406 à 410) |
 | 411, 412 | automatique | Validation de R-IMU : biais d'accéléromètre de 1,0 m/s² sur l'IMU 1, vent 5 m/s venant de 250°, turbulence 2, injection à 135 s ; vol 411 avec la première version du vote (fenêtres décalées d'un échantillon), vol 412 avec la version corrigée |
 | 413 à 440 | automatique | Test de R-IMU, trois IMU, vents 4 m/s venant de 50° (turbulence 1,5), 7 m/s de 190° (2,5) et 8 m/s de 320° (2,5) : dix pannes sur l'IMU 1 (biais de 0,3 et 1,0 m/s², dérive jusqu'à 1,0 m/s², biais de gyroscope de 0,01 et 0,02 rad/s, sans vibration puis avec vibration et flux optique permanent), chacune volée deux fois, sans réponse puis avec R-IMU (vols 413 à 432) ; six nominaux avec R-IMU (vols 433 à 438) ; biais de 1,0 m/s² sur l'IMU 2 (vol 439) et sur l'IMU 3, témoin (vol 440), avec R-IMU |
+| 441 à 444 | automatique | Vols pilotes de la boucle complète, trois IMU, vent 6 m/s venant de 20°, turbulence 2, injection à 128 s : dérive commune jusqu'à 0,5 m/s² (vol 441), leurre de 100 m en échelon (vol 442, classé accéléromètre : le classifieur n'avait jamais vu de leurre), biais de 1,0 m/s² sur l'IMU 1 (vol 443), puis leurre de 100 m refait avec le classifieur réentraîné (vol 444) |
+| 445 à 492 | automatique | Test de la boucle complète, trois IMU, sans vibration, vents 6 m/s venant de 70° (injection à 128 s), 175° (135 s) et 305° (143 s), turbulence 2 : biais d'accéléromètre de 1,0 m/s² sur l'IMU 1, biais de gyroscope de 0,02 rad/s sur l'IMU 2, dérive commune jusqu'à 0,5 m/s², leurres de 100 m en échelon et en rampe, brouillage, magnétomètre, nominal ; chacun volé avec la boucle puis avec la réponse choisie à la main (R-IMU pour les trois pannes d'IMU, R3 sinon). Vols 445 à 486 = logs 459 à 500, vols 487 à 492 = logs 1 à 6 |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 440 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 492 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
