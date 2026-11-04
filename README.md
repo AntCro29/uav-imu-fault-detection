@@ -314,8 +314,8 @@ de mètres). La dérive a été comparée à R-IMU, pas à R3 seul : ce test ne 
   (`classifieur_en_ligne.py`, `evaluer_boucle.py`) et figures.
 - `docs/` : documentation détaillée, figures, rôle des vols de la dernière campagne.
 - `data/` (non versionné) : jeux de données régénérables et journaux de vol. Les logs `.BIN`
-  restent dans le dossier d'ArduPilot (numérotation qui repart à 1 après 500 : voir
-  [`docs/vols.md`](docs/vols.md)).
+  restent dans le dossier d'ArduPilot et sont archivés sous leur numéro de vol
+  ([`docs/index_vols.csv`](docs/index_vols.csv)), car ArduPilot réutilise ses numéros après 500.
 
 ArduCopter V4.8.0-dev, commit `14c871f` (2026-09-09), cloné hors de ce dépôt. Python avec
 pymavlink, pandas, matplotlib et scikit-learn (`requirements.txt`).

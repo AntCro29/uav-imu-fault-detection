@@ -207,8 +207,23 @@ sans attendre. Exemple :
 scripts/lancer_vol.sh leurre 6 20 2 --imus 3 --injection 128 --amplitude 100 --reponse boucle
 ```
 
-ArduPilot ne garde que 500 numéros de log (`LOG_MAX_FILES`) : après le log 500, il repart à 1 en
-écrasant les anciens fichiers. Sauvegarder les logs avant d'y arriver.
+### Archive des logs
+
+ArduPilot ne garde que 500 numéros de log (`LOG_MAX_FILES`, au plus 500) : après le log 500, il
+repart à 1 en écrasant les anciens fichiers (c'est arrivé le 2026-11-03). Il supprime aussi les plus
+anciens quand il reste moins de 500 Mo libres sur le disque (`LOG_FILE_MB_FREE` en SITL). Chaque
+log est donc archivé sous son **numéro de vol**, qui ne revient jamais :
+
+- `~/drone/archive_logs/vols/vol_NNNN.BIN` (ou le dossier de la variable `ARCHIVE_LOGS`) ; les six
+  logs de septembre antérieurs au projet sont dans `hors_projet/` ;
+- `docs/index_vols.csv` (copié dans l'archive) : pour chaque vol, le numéro du log ArduPilot
+  d'origine, la fin d'écriture, la taille, le fichier archivé et le journal du vol ;
+- `lancer_vol.sh` appelle `scripts/archiver_log.py` : avant le vol, il refuse de démarrer si
+  ArduPilot allait écraser un log sans copie identique dans l'archive ; après le vol, il copie le
+  nouveau log (vérifié octet par octet) et ajoute sa ligne à l'index.
+
+Les scripts d'analyse lisent toujours `~/drone/ardupilot/logs/<log>.BIN` : pour un vol dont le log a
+été écrasé, utiliser le fichier de l'archive indiqué dans l'index.
 
 ### Vol manuel
 

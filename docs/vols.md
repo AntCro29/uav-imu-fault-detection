@@ -15,7 +15,8 @@ supprimés. Le numéro de vol vaut le numéro du log ArduPilot moins 14, jusqu'a
 ArduPilot ne garde que 500 numéros de log (`LOG_MAX_FILES`, `AP_Logger.cpp:198-205`) et repart
 ensuite à 1 en écrasant les anciens fichiers : les vols 487 à 492 sont les logs 1 à 6, écrits le
 2026-11-03 par-dessus six logs de septembre antérieurs au projet (perdus ; aucun n'était utilisé).
-Une copie de tous les logs est gardée hors du dossier d'ArduPilot.
+Tous les logs sont archivés hors du dossier d'ArduPilot sous leur numéro de vol ; la correspondance
+vol, log, journal est dans [index_vols.csv](index_vols.csv) (voir [utilisation.md](utilisation.md)).
 
 | Vol | Pilotage | Scénario |
 |-----|----------|----------|
