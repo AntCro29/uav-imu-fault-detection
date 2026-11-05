@@ -60,7 +60,7 @@ optique (les deux biais d'accéléromètre de 1,0 m/s² pris pour le gyroscope).
 - [Pourquoi les petites pannes d'IMU deviennent invisibles sous vibration (vols 329 à 340)](#pourquoi-les-petites-pannes-dimu-deviennent-invisibles-sous-vibration-vols-329-à-340)
 - [Classification de la famille de panne (vols 341 à 376)](#classification-de-la-famille-de-panne-vols-341-à-376)
 - [Récupération des pannes d'IMU : vote entre trois IMU (vols 389 à 440)](#récupération-des-pannes-dimu--vote-entre-trois-imu-vols-389-à-440)
-- [Boucle complète détection → classification → réponse (vols 441 à 492)](#boucle-complète-détection--classification--réponse-vols-441-à-492)
+- [Boucle complète détection → classification → réponse (vols 441 à 543)](#boucle-complète-détection--classification--réponse-vols-441-à-543)
 
 ## Premier détecteur à seuil (vols 5 à 11)
 
@@ -1127,7 +1127,7 @@ précédents) n'est pas reconnaissable par un vote ; la décision est définitiv
 (pas de retour sur l'IMU réparée) ; le vote ne s'appuie que sur l'écart moyen sur 2 s, une panne
 plus petite que le bruit entre IMU sous vibration (de l'ordre de 0,2 m/s² et 0,008 rad/s) lui échappe.
 
-## Boucle complète détection → classification → réponse (vols 441 à 492)
+## Boucle complète détection → classification → réponse (vols 441 à 543)
 
 Jusqu'ici, chaque réponse était choisie à la main pour la panne injectée : R3 pour le GPS, R-IMU
 pour une IMU. La boucle (`vol_auto.py --reponse boucle`, avec `--imus 3` ; choix d'Antoine du
@@ -1306,6 +1306,94 @@ Limite gardée pour une version suivante (décision d'Antoine) : une seule déci
 quand elle est « aucune action » ; une fausse alarme, ou un incident, la consomme, et une vraie
 panne plus tardive n'est que signalée.
 
-Campagne prévue (non volée) : 3 pilotes (leurre, biais sur l'IMU 1, dérive commune ; 6 m/s de 20°)
+Campagne prévue (volée ensuite, voir ci-dessous) : 3 pilotes (leurre, biais sur l'IMU 1, dérive commune ; 6 m/s de 20°)
 puis 48 vols comme la v1, avec vibration et flux optique permanent, vents 6 m/s de 35°, 170° et
 310° (jamais utilisés), injection à 128, 135 et 143 s ; arguments validés par `vol_auto.py`.
+
+### Boucle sous vibration (v2) : vols pilotes et test (vols 493 à 543)
+
+**Vols pilotes (vols 493 à 495, logs 7 à 9 ; 6 m/s venant de 20°, turbulence 2, injection à
+128 s, vibration et flux optique permanent).** Leurre de 100 m : alarme de l'autoencodeur à
++0,5 s, classé GPS, GPS écarté à +3,4 s, repris à +90 s (écart 2,9 m). Biais de 1,0 m/s² sur
+l'IMU 1 : vote IMU 0 à +1,1 s, cœur 1 forcé, aucune classification. Dérive commune de 0,5 m/s² :
+aucune alarme, aucune action. Conformes tous les trois ; premiers vols archivés automatiquement
+(`archiver_log.py`), sans toucher aux logs de septembre.
+
+**Campagne de test (vols 496 à 543, logs 10 à 57, 2026-11-04 de 18 h 56 à 0 h 53).** Composition
+de la v1 (huit scénarios × trois vents, chacun avec la boucle puis avec la réponse choisie à la
+main), avec vibration et flux optique permanent ; vents 6 m/s turbulence 2 venant de 35°
+(injection à 128 s), 170° (135 s) et 310° (143 s), jamais utilisés. Résultats attendus inchangés
+(`evaluer_boucle.py`).
+
+**Déroulé** (`verifier_boucle.py`, qui vérifie maintenant aussi la vibration et le flux quand la
+commande les demande ; sortie de la campagne v1 inchangée) : 48 / 48 conformes, aucun trou
+(≤ 101 ms), aucun dernier recours. Altitude vraie minimale en cercle 12,6 à 14,7 m (même ordre que
+la campagne de nuit sous vibration). Sept vols non désarmés (499, 514, 517, 520, 526, 530, 533) :
+rebonds au sol sous vibration après l'atterrissage, mission complète dans le log. Vol 526 (nominal,
+boucle) : posé à 7 m du départ vers 230 s de cercle, puis, toujours armé, déplacé d'environ 80 m
+au ras du sol entre 240 et 260 s (même phénomène).
+
+**Résultats** (`evaluer_boucle.py`, une seule exécution, aucun réglage changé ensuite). Décision
+conforme sur les 48 vols : aucune exclusion du GPS à tort, aucune action sur les 6 nominaux, bonne
+IMU désignée sur les 12 vols à panne d'IMU isolable, 100 % du temps dans la zone sur tous les vols.
+
+Pannes d'IMU et magnétomètre (erreur d'attitude max du cœur principal, pendant la panne / 90 s
+après ; erreur de position ≤ 0,9 m partout) :
+
+| Panne | Boucle | Réponse choisie à la main |
+|---|---|---|
+| Biais 1,0 m/s², IMU 1 | IMU 0 désignée à +1,1 s (×3) ; 0,76-1,28° / 0,74-0,98° | R-IMU : +1,1 s ; 0,79-1,21° / 0,68-0,84° |
+| Gyroscope 0,02 rad/s, IMU 2 | IMU 1 désignée à +1,5 à 1,6 s ; 1,60-2,77° / 1,93-4,02° | R-IMU : +1,6 à 1,7 s ; 1,83-2,34° / 2,14-2,54° |
+| Dérive commune 0,5 m/s² | aucune IMU, GPS gardé ; 2,82-3,38° / 3,16-4,07° | R-IMU : idem ; 3,09-3,56° / 2,04-3,10° |
+| Magnétomètre | classé magnéto, aucune action ; 2,79-2,87° / 2,36-3,82° | R3 : aucune action ; 2,24-4,13° / 2,46-2,78° |
+
+Pannes GPS (délai d'exclusion, retour au GPS ; erreur de position vraie max du cœur principal,
+pendant / 90 s après) :
+
+| Panne, vent | Boucle | R3 |
+|---|---|---|
+| Leurre échelon, 35° | +3,4 s, repris +90,1 s ; 2,5 / 3,8 m | +0,6 s, +90,3 s ; 13,4 / 10,8 m |
+| Leurre échelon, 170° | +3,5 s, +90,3 s ; 18,2 / 17,0 m | +0,5 s, +90,4 s ; 6,3 / 6,9 m |
+| Leurre échelon, 310° | +3,4 s, +90,3 s ; 10,6 / 9,0 m | +0,6 s, +90,3 s ; 8,6 / 8,6 m |
+| Rampe 100 m, 35° | +3,4 s, +90,3 s ; 13,2 / 15,3 m | +0,6 s, +90,4 s ; 5,8 / 7,4 m |
+| Rampe 100 m, 170° | +3,6 s, +90,3 s ; 16,2 / 12,1 m | +0,5 s, +90,3 s ; 14,0 / 20,7 m |
+| Rampe 100 m, 310° | +3,6 s, +90,3 s ; 16,9 / 18,6 m | +0,6 s, +90,3 s ; 6,7 / 7,1 m |
+| Brouillage, 35° | fix +0,7 s, +90,3 s ; 3,8 / 5,0 m | +0,7 s, +90,3 s ; 6,1 / 4,3 m |
+| Brouillage, 170° | +0,7 s, +90,3 s ; 11,5 / 12,8 m | +0,9 s, +90,5 s ; 4,4 / 8,2 m |
+| Brouillage, 310° | +0,7 s, +90,3 s ; 10,7 / 8,1 m | +0,6 s, +90,2 s ; 9,7 / 9,5 m |
+
+Familles données par le classifieur dans les 24 vols de la boucle : 9 justes sur 9 classés
+(leurres et rampes 6 / 6, magnétomètre 3 / 3), tous déclenchés par l'autoencodeur, 2,9 s après
+l'alarme. Quinze vols sans classification : pannes d'IMU (le vote bascule seul et aucun détecteur
+ne déclenche), brouillage (la perte du fix écarte le GPS dès l'alarme), nominaux.
+
+**Attribution des alarmes** (débuts et fins d'alarme de chaque détecteur, lignes « DÉTECTEUR »
+des 24 journaux de la boucle ; fausse alarme = alarme commencée après 10 s de cercle et avant
+l'injection, ou avant le RTL pour un nominal, soit 3 276 s de vol normal) :
+
+- **aucune fausse alarme**, ni de l'autoencodeur, ni de l'Isolation Forest (la préparation en
+  laissait attendre environ une sur 2 300 s) ;
+- autoencodeur : alarme à +0,5 à 0,7 s sur les 9 leurres et rampes et les 3 magnétomètres ;
+  pendant le brouillage, en même temps que la règle du fix ; quelques reprises de quelques secondes
+  après le retrait du magnétomètre ;
+- Isolation Forest : aucune alarme propre ; ses seules alarmes sont celles de la règle du fix,
+  pendant les brouillages ;
+- pannes d'IMU (biais, gyroscope, dérive) : aucune alarme, ni de l'un ni de l'autre, comme pendant
+  la campagne de nuit ; le vote traite seul les deux premières.
+
+Ce qu'il faut en retenir :
+
+- **Sous vibration aussi, sans connaître la panne, la boucle fait ce que fait la réponse choisie à
+  la main, sur les 24 configurations**, sans fausse alarme.
+- Le GPS est écarté 3 s plus tard sur les leurres (attente du classifieur) ; les erreurs de
+  position qui suivent vont dans les deux sens entre boucle et R3 (2,5 contre 13,4 m sous 35°,
+  18,2 contre 6,3 m sous 170°) : un vol par vent ne permet pas de les départager.
+- Contrairement à la v1 (sans vibration ni flux optique), la rampe ne fait plus reprendre le GPS
+  trop tôt : il est repris à +90 s, 30 s après la fin du leurre, avec la boucle comme avec R3 ; la
+  configuration diffère (flux optique permanent), la cause n'a pas été vérifiée.
+- Dans ce test, l'Isolation Forest n'a rien ajouté à l'autoencodeur. Pendant la campagne de nuit,
+  il avait vu seul deux biais de gyroscope de 0,02 rad/s ; ici, ces pannes sont sur une seule IMU et
+  le vote les traite avant. Le retirer du déclencheur reste une piste, à tester sur des vols neufs.
+
+Limites : un vol par configuration, un seul niveau de vent ; une seule décision par vol ; pannes
+d'IMU de petite amplitude sous vibration toujours invisibles aux détecteurs.

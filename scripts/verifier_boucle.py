@@ -1,8 +1,8 @@
 """Déroulé d'une campagne de la boucle complète comparé à la commande, sans lire aucun résultat.
 
 Usage : python scripts/verifier_boucle.py [--depuis AAAAMMJJ-HHMMSS] <logs> <journal> [<journal> ...]
-(mêmes arguments qu'evaluer_boucle.py). Par vol : SIM_IMU_COUNT et EK3_IMU_MASK à 3, vent, ni
-vibration ni flux optique ; paramètres de panne attendus et eux seuls (SIM_ACCn_BIAS_X,
+(mêmes arguments qu'evaluer_boucle.py). Par vol : SIM_IMU_COUNT et EK3_IMU_MASK à 3, vent, vibration
+et flux optique permanent si la commande les demande (valeurs de vol_auto.py), sinon absents ; paramètres de panne attendus et eux seuls (SIM_ACCn_BIAS_X,
 SIM_GYRn_BIAS_X, SIM_ACC1/2/3_BIAS_X pour la dérive, SIM_GPS1_GLTCH_X, SIM_GPS1_JAM,
 SIM_MAG1/2/3_OFS_X) ; injection à l'instant demandé, retrait 60 s après, nombre de pas d'une rampe ;
 RTL à injection + 150 s (180 s pour un nominal ; un RTL plus tôt est celui du dernier recours de R3,
@@ -10,13 +10,20 @@ RTL à injection + 150 s (180 s pour un nominal ; un RTL plus tôt est celui du 
 départ ; désarmement et position vraie à ce moment ; plus grand intervalle entre deux messages XKF4
 (cœur 0) et SIM.
 """
+import ast
 import math
+import os
 from pymavlink import mavutil
 from evaluer_boucle import arguments
 from evaluer_rimu import LOGS
 
+# vol_auto.py ne s'importe pas (il lance le vol) : ses réglages sont lus dans le code source
+_SOURCE = ast.parse(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vol_auto.py")).read())
+_CONSTANTES = {n.targets[0].id: ast.literal_eval(n.value) for n in _SOURCE.body if isinstance(n, ast.Assign)
+               and isinstance(n.targets[0], ast.Name) and n.targets[0].id in ("VIBRATION", "FLUX_OPTIQUE", "FLUX_PERMANENT")}
+VIBRATION, FLUX_OPTIQUE, FLUX_PERMANENT = (_CONSTANTES[k] for k in ("VIBRATION", "FLUX_OPTIQUE", "FLUX_PERMANENT"))
 REGLAGES = ("SIM_IMU_COUNT", "EK3_IMU_MASK", "SIM_WIND_SPD", "SIM_WIND_DIR", "SIM_WIND_TURB", "SIM_WIND_T",
-            "SIM_VIB_MOT_MAX", "SIM_FLOW_ENABLE")
+            *VIBRATION, *FLUX_OPTIQUE, *FLUX_PERMANENT)
 PANNES = sorted({f"SIM_{c}{n}_BIAS_X" for c in ("ACC", "GYR") for n in (1, 2, 3)}
                 | {f"SIM_MAG{n}_OFS_X" for n in (1, 2, 3)} | {"SIM_GPS1_GLTCH_X", "SIM_GPS1_JAM", "SIM_GPS1_ENABLE"})
 
@@ -28,7 +35,7 @@ def attendus(c):
             "magneto": ["SIM_MAG1_OFS_X", "SIM_MAG2_OFS_X", "SIM_MAG3_OFS_X"], "nominal": []}[c["scenario"]]
 
 
-def verifier(n, c):
+def verifier(n, c, journal=""):
     m = mavutil.mavlink_connection(LOGS.format(n))
     reg, derniere, chg, arm, sim = {}, {}, [], [], []
     tc = trtl = None
@@ -65,8 +72,16 @@ def verifier(n, c):
     vent = (reg.get("SIM_WIND_SPD"), reg.get("SIM_WIND_DIR"), reg.get("SIM_WIND_TURB"))
     if any(v is None or abs(v - w) > 1e-3 for v, w in zip(vent, c["vent"])) or reg.get("SIM_WIND_T") != 1:
         pb.append(f"vent {vent}")
-    if reg.get("SIM_VIB_MOT_MAX", 0) > 0 or reg.get("SIM_FLOW_ENABLE", 0) == 1:
-        pb.append("vibration ou flux")
+    vibration, flux = "_vibration_" in journal, "_flux_permanent_" in journal
+    for groupe, demande, temoin in ((VIBRATION, vibration, "SIM_VIB_MOT_MAX"), (FLUX_OPTIQUE, flux, "SIM_FLOW_ENABLE"),
+                                    (FLUX_PERMANENT, flux, None)):
+        if demande:
+            faux = [k for k, v in groupe.items() if reg.get(k) != v]
+        else:
+            faux = [temoin] if temoin and reg.get(temoin, 0) != 0 else []
+        if faux:
+            pb.append(("réglage différent de la commande : " if demande else "inattendu : ")
+                      + ", ".join(f"{k}={reg.get(k)}" for k in faux))
     enc = [(t - tc, nom, v, v0) for t, nom, v, v0 in chg if t > tc]
     if len(enc) != len(chg):
         pb.append(f"{len(chg) - len(enc)} changement(s) avant le cercle")
@@ -109,5 +124,5 @@ def verifier(n, c):
 
 
 if __name__ == "__main__":
-    for n, c, _ in arguments():
-        print(verifier(n, c), flush=True)
+    for n, c, j in arguments():
+        print(verifier(n, c, j), flush=True)

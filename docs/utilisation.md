@@ -84,7 +84,11 @@ ce dépôt, dans `~/drone/ardupilot`.
   boucle complète (décision, IMU déclarée, exclusions et retours au GPS, dernier recours,
   conformité au résultat attendu, erreurs vraies, temps dans la zone). `<logs>` donne les numéros
   dans l'ordre des vols, en plages (la numérotation d'ArduPilot repart à 1 après 500). Exemple :
-  `python scripts/evaluer_boucle.py --depuis 20261103-182500 459-500,1-6 data/journal_*_2026110[34]-*.txt`.
+  `python scripts/evaluer_boucle.py --depuis 20261103-182500 459-500,1-6 data/journal_*_20261103-*.txt data/journal_*_20261104-0*.txt`
+  (sans vibration, vols 445 à 492) et
+  `python scripts/evaluer_boucle.py --depuis 20261104-185000 10-57 data/journal_*_2026110[45]-*.txt`
+  (sous vibration, vols 496 à 543). `verifier_boucle.py` attend vibration et flux optique quand le
+  nom du journal les demande.
 - `scripts/comparer_reponses.py <image.png> <titre> <log:étiquette> [...]` : plusieurs vols
   d'une même panne, une ligne par réponse (trajectoire, positions vraie et estimée en fonction du
   temps, erreur de navigation, décisions de R3 et d'ArduPilot). Résultats :

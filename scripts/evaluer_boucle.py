@@ -5,10 +5,12 @@ Usage : python scripts/evaluer_boucle.py [--depuis AAAAMMJJ-HHMMSS] <logs> <jour
 d'ArduPilot repart à 1 après 500, LOG_MAX_FILES, AP_Logger.cpp:198-205). Les journaux (ceux de
 l'horodatage --depuis ou plus récents) sont triés par horodatage et associés un à un à ces logs ; la
 configuration est lue dans le nom du journal.
-Exemple (campagne de test du 2026-11-03, vols 445 à 492) :
-  python scripts/evaluer_boucle.py --depuis 20261103-182500 459-500,1-6 data/journal_*_2026110[34]-*.txt
+Exemples (campagne de test du 2026-11-03, vols 445 à 492 ; sous vibration, vols 496 à 543) :
+  python scripts/evaluer_boucle.py --depuis 20261103-182500 459-500,1-6 data/journal_*_20261103-*.txt data/journal_*_20261104-0*.txt
+  python scripts/evaluer_boucle.py --depuis 20261104-185000 10-57 data/journal_*_2026110[45]-*.txt
 Par vol, t = 0 à l'entrée en CIRCLE :
-  - décision de la boucle (première ligne « BOUCLE : famille ... »), IMU déclarée par le vote et son
+  - décision de la boucle (première ligne « BOUCLE : famille ... ») et canaux d'alarme qui ont
+    déclenché l'épisode (boucle sous vibration : « épisode déclenché par »), IMU déclarée par le vote et son
     délai, exclusions du GPS par R3 (délai, cause), retours au GPS, dernier recours ;
   - conformité au résultat attendu, fixé avant tout calcul : biais sur l'IMU 1 → vote IMU 0 acc,
     GPS gardé ; gyro sur l'IMU 2 → vote IMU 1 gyr, GPS gardé ; dérive commune → aucune IMU, GPS
@@ -60,12 +62,14 @@ def associer(logs, journaux, depuis=None):
 
 
 def lire_journal(chemin):
-    r = {"famille": None, "decision": None, "imu": None, "t_imu": None, "exclusions": [], "retours": [], "recours": None}
+    r = {"declencheur": None, "famille": None, "decision": None, "imu": None, "t_imu": None, "exclusions": [], "retours": [], "recours": None}
     for ligne in open(chemin):
         m = re.search(r"cercle=\s*([\d.]+) s", ligne)
         if not m:
             continue
         t = float(m.group(1))
+        if "épisode déclenché par" in ligne and r["declencheur"] is None:
+            r["declencheur"] = ligne.split("déclenché par ", 1)[1].split(" ;")[0]
         if "BOUCLE : famille" in ligne and r["famille"] is None:
             r["famille"] = re.search(r"famille (\S+)", ligne).group(1).rstrip(",")
             r["decision"] = ligne.split("BOUCLE : ", 1)[1].strip()
@@ -107,7 +111,7 @@ def evaluer(n, c, j):
         if c["reponse"] in ("boucle", "rimu") and jr["imu"] != attendue:
             pb.append(f"vote : {jr['imu'] or 'aucune'} (attendu {attendue or 'aucune'})")
     r = {"log": n, "scenario": c["scenario"], "vent": int(c["vent"][1]), "reponse": c["reponse"],
-         "famille": jr["famille"] or "—",
+         "declencheur": jr["declencheur"] or "—", "famille": jr["famille"] or "—",
          "imu": (f"{jr['imu']} +{jr['t_imu'] - t0:.1f}" if jr["imu"] else "—"),
          "gps_ecarte": "; ".join(f"+{t - t0:.1f} ({cause.split(';')[0][:22]})" for t, cause in excl) or "—",
          "retour": ", ".join(f"+{t - t0:.1f}" for t in jr["retours"]) or "—",

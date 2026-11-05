@@ -9,12 +9,14 @@ Numérotation : les vols manuels 1 à 4 sont les logs ArduPilot 13 à 16 ; à pa
 numéro du log = numéro du vol + 14 (vol 5 = `00000019.BIN`). Détail de chaque campagne dans
 [demarche.md](demarche.md).
 
-Quatre cent quatre-vingts vols ont été réalisés en SITL (ArduCopter, vol en cercle), numérotés de 1
-à 492 : les numéros 377 à 388 correspondent à des tentatives sans décollage, dont les logs ont été
+Cinq cent trente et un vols ont été réalisés en SITL (ArduCopter, vol en cercle), numérotés de 1
+à 543 : les numéros 377 à 388 correspondent à des tentatives sans décollage, dont les logs ont été
 supprimés. Le numéro de vol vaut le numéro du log ArduPilot moins 14, jusqu'au vol 486 (log 500).
 ArduPilot ne garde que 500 numéros de log (`LOG_MAX_FILES`, `AP_Logger.cpp:198-205`) et repart
 ensuite à 1 en écrasant les anciens fichiers : les vols 487 à 492 sont les logs 1 à 6, écrits le
 2026-11-03 par-dessus six logs de septembre antérieurs au projet (perdus ; aucun n'était utilisé).
+Les vols 493 et suivants sont les logs 7 et suivants (les logs 7 à 12 de septembre ont été archivés
+avant d'être écrasés).
 Tous les logs sont archivés hors du dossier d'ArduPilot sous leur numéro de vol ; la correspondance
 vol, log, journal est dans [index_vols.csv](index_vols.csv) (voir [utilisation.md](utilisation.md)).
 
@@ -79,9 +81,11 @@ vol, log, journal est dans [index_vols.csv](index_vols.csv) (voir [utilisation.m
 | 413 à 440 | automatique | Test de R-IMU, trois IMU, vents 4 m/s venant de 50° (turbulence 1,5), 7 m/s de 190° (2,5) et 8 m/s de 320° (2,5) : dix pannes sur l'IMU 1 (biais de 0,3 et 1,0 m/s², dérive jusqu'à 1,0 m/s², biais de gyroscope de 0,01 et 0,02 rad/s, sans vibration puis avec vibration et flux optique permanent), chacune volée deux fois, sans réponse puis avec R-IMU (vols 413 à 432) ; six nominaux avec R-IMU (vols 433 à 438) ; biais de 1,0 m/s² sur l'IMU 2 (vol 439) et sur l'IMU 3, témoin (vol 440), avec R-IMU |
 | 441 à 444 | automatique | Vols pilotes de la boucle complète, trois IMU, vent 6 m/s venant de 20°, turbulence 2, injection à 128 s : dérive commune jusqu'à 0,5 m/s² (vol 441), leurre de 100 m en échelon (vol 442, classé accéléromètre : le classifieur n'avait jamais vu de leurre), biais de 1,0 m/s² sur l'IMU 1 (vol 443), puis leurre de 100 m refait avec le classifieur réentraîné (vol 444) |
 | 445 à 492 | automatique | Test de la boucle complète, trois IMU, sans vibration, vents 6 m/s venant de 70° (injection à 128 s), 175° (135 s) et 305° (143 s), turbulence 2 : biais d'accéléromètre de 1,0 m/s² sur l'IMU 1, biais de gyroscope de 0,02 rad/s sur l'IMU 2, dérive commune jusqu'à 0,5 m/s², leurres de 100 m en échelon et en rampe, brouillage, magnétomètre, nominal ; chacun volé avec la boucle puis avec la réponse choisie à la main (R-IMU pour les trois pannes d'IMU, R3 sinon). Vols 445 à 486 = logs 459 à 500, vols 487 à 492 = logs 1 à 6 |
+| 493 à 495 | automatique | Vols pilotes de la boucle sous vibration, trois IMU, vibration et flux optique permanent, vent 6 m/s venant de 20°, turbulence 2, injection à 128 s : leurre de 100 m en échelon (vol 493), biais de 1,0 m/s² sur l'IMU 1 (vol 494), dérive commune jusqu'à 0,5 m/s² (vol 495), avec la boucle. Logs 7 à 9 |
+| 496 à 543 | automatique | Test de la boucle sous vibration : mêmes scénarios que les vols 445 à 492, avec vibration et flux optique permanent, vents 6 m/s venant de 35° (injection à 128 s), 170° (135 s) et 310° (143 s), turbulence 2 ; chacun volé avec la boucle puis avec la réponse choisie à la main. Logs 10 à 57 |
 
 Les vols 8 à 11 refont les vols manuels 1 à 4 avec le pilotage automatique : les
-vols 5 à 492 forment ainsi une série réalisée avec exactement le même protocole. À partir
+vols 5 à 543 forment ainsi une série réalisée avec exactement le même protocole. À partir
 du vol 12, les vols ajoutent du vent (`SIM_WIND_SPD`, `SIM_WIND_DIR`, `SIM_WIND_TURB`), réglé
 uniforme en altitude (`SIM_WIND_T = 1`), sauf les vols indiqués sans vent. Les vols 36
 à 58 ont d'abord servi de jeu de test au seuil adaptatif et au premier Isolation Forest, puis de
