@@ -5,7 +5,7 @@ Mêmes réglages que comparer_detecteurs.py : seuil fixe (2 × max nominal) cali
 Forest entraîné sur les logs ≤ dernier_log_calibration. Panneaux : SV, SP, SM avec le seuil fixe
 et le seuil adaptatif (k = 6) ; score d'anomalie de l'Isolation Forest et son seuil ; alarmes
 des quatre détecteurs (fixe, adaptatif, Isolation Forest, ML + adaptatif). Zone rose : panne.
-Exemple (figure du README, dérive de 0,5 m/s², vol 104) :
+Exemple (figure 1 de docs/resultats.md, dérive de 0,5 m/s², vol 104) :
     python scripts/tracer_detecteurs.py data/jeu_test 49 118 docs/figures/test_derive_vol104.png
 """
 import os
