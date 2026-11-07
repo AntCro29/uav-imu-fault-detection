@@ -122,6 +122,12 @@ ce dépôt, dans `~/drone/ardupilot`.
 - `scripts/animer_qgc.py <log.BIN> <enregistrement.mov> <décalage_s> <sortie.mp4> [t_debut t_fin]` :
   enregistrement d'écran de QGroundControl (connecté au SITL en TCP sur le port 5762) à côté de la
   vérité du même vol, synchronisés sur un changement de mode visible dans QGC.
+- `scripts/figures_readme.py [dossier]` : les trois figures du README, lues dans l'archive des logs
+  (le chronogramme de la boucle lit aussi la trace de vol, dans `data/`, non versionné).
+- `scripts/exporter_dashboard.py [sortie]` : données du tableau de bord `docs/dashboard/` (48 vols de
+  test de la boucle sous vibration : résultats d'`evaluer_boucle.py`, traces de vol, erreurs vraies,
+  positions), écrites dans `docs/dashboard/donnees.js`. La page (`index.html`, avec Plotly copié à
+  côté) s'ouvre aussi hors ligne.
 - `docs/figures/` : figures issues des premiers vols.
 
 Les logs de vol (`.BIN`, `.tlog`) ne sont pas versionnés.

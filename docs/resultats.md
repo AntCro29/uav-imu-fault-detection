@@ -204,14 +204,14 @@ vibration. Même test, sur 48 autres vols neufs (vents de 35°, 170° et 310°) 
 | Panne (3 vols chacune) | Boucle | Réponse choisie à la main |
 |---|---|---|
 | Biais d'accéléromètre, une IMU | IMU désignée en 1,1 s ; attitude ≤ 1,3° | identique (R-IMU) |
-| Biais de gyroscope, une IMU | IMU désignée en 1,5 à 1,6 s ; attitude ≤ 4,0° | R-IMU : 1,6 à 1,7 s ; ≤ 2,5° |
+| Biais de gyroscope, une IMU | IMU désignée en 1,5 à 1,6 s ; attitude ≤ 4,1° | R-IMU : 1,6 à 1,7 s ; ≤ 2,5° |
 | Dérive commune aux trois IMU | aucune action | identique (R-IMU) |
 | Leurre de 100 m en échelon | GPS écarté à +3,4 s, repris à +90 s ; erreur de position max 4 à 18 m | R3 : +0,5 s ; 7 à 13 m |
 | Leurre en rampe jusqu'à 100 m | GPS écarté à +3,5 s, repris à +90 s ; 15 à 19 m | R3 : +0,5 s ; 7 à 21 m |
 | Brouillage | GPS écarté à la perte du fix (+0,7 s), repris à +90 s ; 5 à 13 m | identique (R3) ; 6 à 10 m |
 | Magnétomètre ; vol normal | aucune action | identique (R3) |
 
-**Bonne réponse 24 fois sur 24 là aussi, sans aucune fausse alarme** sur 3 276 s de vol normal, et
+**Bonne réponse 24 fois sur 24 là aussi, sans aucune fausse alarme** sur 3 142 s de vol normal, et
 le drone reste 100 % du temps dans la zone surveillée, de l'injection à 150 s après. Le
 classifieur donne la bonne famille sur les 9 vols qu'il classe (leurres, rampes, magnétomètre).
 Chaque alarme a été attribuée à son détecteur : toutes viennent de l'autoencodeur ; l'Isolation Forest n'a sonné que par la règle du

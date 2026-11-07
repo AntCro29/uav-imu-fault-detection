@@ -65,7 +65,7 @@ flowchart LR
 4. **La réaction à une panne d'IMU, le vote entre IMU** : le drone simulé porte trois IMU. Un vote
    compare en continu leurs mesures, désigne celle qui s'écarte des deux autres, puis oblige l'EKF
    à utiliser celle de ses deux estimations (ses deux « cœurs », chacun alimenté par une IMU) qui
-   ne dépend pas de l'IMU fautive. ArduPilot ne le fait pas de lui-même : sur nos vols d'essai,
+   ne dépend pas de l'IMU fautive. ArduPilot ne le fait pas de lui-même : sur les vols d'essai,
    il n'a jamais basculé et l'erreur d'orientation est montée jusqu'à 6° (au test, il a basculé
    une fois, 9,8 s après le début de la panne).
 
@@ -76,7 +76,7 @@ injectée ; elle prend une seule décision par vol.
 
 Test unique sur 48 vols neufs, jamais utilisés pour un réglage : trois IMU, vibration des moteurs,
 flux optique, vent de 6 m/s venant de trois directions jamais vues. Chaque panne, injectée pendant
-60 s, est volée deux fois : avec la boucle, puis avec la réaction que nous aurions choisie à la
+60 s, est volée deux fois : avec la boucle, puis avec la réaction que j'aurais choisie à la
 main en connaissant la panne.
 
 | Panne injectée | Ce que fait la boucle, sans connaître la panne | Résultat |
@@ -90,7 +90,7 @@ main en connaissant la panne.
 | Aucune panne | rien | aucune fausse alarme |
 
 - **Bonne réaction 24 fois sur 24**, la même que la réaction choisie à la main ;
-- **aucune fausse alarme** sur 3 276 s de vol normal ;
+- **aucune fausse alarme** sur 3 142 s de vol normal ;
 - **drone 100 % du temps dans sa zone de mission** (60 m autour du centre du cercle), de
   l'injection à 150 s après ;
 - dernier recours jamais déclenché.
@@ -138,16 +138,16 @@ son cercle.*
 3. **Le critère de reprise du GPS est fragile.** Le GPS est repris quand il redevient cohérent
    avec l'estimation du drone. Sans flux optique, l'estimation dérive, et un leurre qui s'installe
    lentement a été repris trop tôt (erreur de 99 m). Avec le flux optique, ce n'est plus arrivé
-   dans nos tests, mais la cause n'est pas démontrée.
+   dans les tests, mais la cause n'est pas démontrée.
 4. **Une seule décision par vol.** Une fausse alarme ou un incident consomme la décision ; une
    vraie panne plus tardive n'est que signalée.
 5. **La validation reste limitée** : simulation seulement, un à trois vols par configuration, un
    seul niveau de vent pour la boucle, une seule mission, un seul type de drone. Les leurres sont
    simplifiés (la position est décalée, pas la vitesse).
 
-## Comment on y est arrivé
+## Les étapes du projet
 
-| Étape | Ce qui a été fait | Ce qu'on en a appris |
+| Étape | Ce qui a été fait | Ce que l'étape a montré |
 |---|---|---|
 | 1. Banc de vols | vols automatiques en Python (pymavlink), pannes injectées par les paramètres du simulateur, données étiquetées à 10 Hz | — |
 | 2. Détection, IMU idéale | seuil fixe, seuil adaptatif (qui suit le niveau récent des innovations), Isolation Forest | 41 pannes sur 42 sans fausse alarme : avec une IMU sans bruit, le problème est facile |
@@ -190,6 +190,9 @@ Le détail de chaque étape, avec ses tableaux et ses figures, est dans
 
 ## Pour aller plus loin
 
+- [Tableau de bord](https://antcro29.github.io/uav-imu-fault-detection/dashboard/) : les 48 vols
+  de test sous vibration, vol par vol, avec leur chronogramme interactif (aussi lisible hors ligne :
+  ouvrir `docs/dashboard/index.html`).
 - [`docs/resultats.md`](docs/resultats.md) : les résultats de chaque étape, avec leurs tableaux et
   leurs figures.
 - [`docs/demarche.md`](docs/demarche.md) : la démarche complète, dans l'ordre chronologique, avec
@@ -206,7 +209,7 @@ Le détail de chaque étape, avec ses tableaux et ses figures, est dans
   `classifieur_en_ligne.py`), réaction aux pannes GPS (`recuperation.py`), vote entre IMU
   (`vote_imu.py`, `trois_imu.parm`), évaluation (`comparer_detecteurs.py`,
   `erreur_navigation.py`, `evaluer_rimu.py`, `evaluer_boucle.py`), figures
-  (`figures_readme.py` pour celles de cette page).
+  (`figures_readme.py` pour celles de cette page, `exporter_dashboard.py` pour le tableau de bord).
 - `docs/` : documentation détaillée et figures.
 - `data/` (non versionné) : jeux de données régénérables et journaux de vol. Les logs `.BIN` sont
   archivés hors du dépôt sous leur numéro de vol, car ArduPilot réutilise ses numéros après 500.

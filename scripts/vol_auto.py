@@ -45,12 +45,12 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
   natif : FS_EKF_ACTION 1, réglage par défaut d'ArduPilot (LAND sur failsafe EKF) ;
   natif_trainee : idem, plus la traînée (--trainee) et FS_DR_ENABLE 2 (RTL dès que l'EKF navigue
                   à l'estime, défaut d'ArduPilot) ;
-  r3 : notre réponse (recuperation.py) : détecteur et traînée actifs, FS_EKF_ACTION 0,
+  r3 : réponse du projet (recuperation.py) : détecteur et traînée actifs, FS_EKF_ACTION 0,
        FS_DR_ENABLE 0, FS_DR_TIMEOUT 120 ; sur décision de R3, bascule sur le jeu de sources sans
        GPS (comme --bascule), retour au jeu 1, ou RTL en dernier recours (LAND si ArduPilot le
        refuse). Chaque décision est écrite dans le journal, et l'état de R3 dans la trace du
        détecteur.
-  rimu : notre réponse à une panne d'IMU (vote_imu.py, avec --imus 3) : pendant le cercle, vote
+  rimu : réponse du projet à une panne d'IMU (vote_imu.py, avec --imus 3) : pendant le cercle, vote
          entre les trois IMU (SCALED_IMU, SCALED_IMU2, SCALED_IMU3 à 25 Hz) ; si une IMU est
          déclarée en panne et qu'elle est celle d'un cœur EKF, le cœur de l'autre IMU est forcé
          principal (EK3_PRIMARY, puis EK3_OPTIONS bit 1 ManualLaneSwitch, qui verrouille ce
@@ -72,7 +72,7 @@ MAV_CMD_SET_EKF_SOURCE_SET, pendant 60 s, puis revient au jeu 1 (GPS).
 --bruit R : bruit de gyroscope des deux IMU pendant tout le vol (SIM_GYR*_RND = R, réglé avant
 le décollage, même effet que le scénario bruit_gyro : radians(R) × gaz, donc nul moteurs
 arrêtés). Le commentaire du simulateur (AP_InertialSensor_SITL.cpp:235) donne 0,2 à 0,4 rad/s
-pour un vrai multirotor, soit R ≈ 30 à 60 avec les gaz de nos vols (≈ 0,38) ; ces valeurs
+pour un vrai multirotor, soit R ≈ 30 à 60 avec les gaz de ces vols (≈ 0,38) ; ces valeurs
 correspondent en fait à la vibration d'un quad de 180 mm (voir --vibration) : en bruit blanc,
 R = 30 ou 60 est bien plus fort que le bruit d'une vraie IMU (README).
 --vibration : vibration des moteurs pendant tout le vol, réglée avant le décollage avec les

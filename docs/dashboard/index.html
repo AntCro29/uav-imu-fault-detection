@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boucle de récupération drone</title>
+<meta name="description" content="Tableau de bord des 48 vols de test de la boucle détection, classification et réaction aux pannes capteurs, sous vibration, en simulation ArduPilot.">
+<style>
+  :root {
+    --fond: #f7f7f5; --carte: #ffffff; --encre: #1d1d1b; --encre-2: #5a5a54; --encre-3: #85857d;
+    --trait: #e2e2dc; --accent: #0b63c4; --accent-fond: #e8f1fb;
+    --ok: #1b7a46; --ok-fond: #e6f4ec; --ko: #b3261e; --ko-fond: #fbeae9;
+    --panne: rgba(213, 94, 0, 0.12); --grille: #e9e9e4;
+    /* Okabe & Ito, palette conçue pour les daltoniens */
+    --c1: #0072B2; --c2: #E69F00; --c3: #009E73; --c4: #CC79A7; --c5: #D55E00; --vrai: #1d1d1b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fond: #141413; --carte: #1f1f1d; --encre: #f0efea; --encre-2: #bcbbb2; --encre-3: #8d8c84;
+      --trait: #34342f; --accent: #6aa9f0; --accent-fond: #1a2a3d;
+      --ok: #5cc592; --ok-fond: #17301f; --ko: #f08b84; --ko-fond: #3a1d1b;
+      --panne: rgba(230, 120, 40, 0.10); --grille: #2c2c28;
+      --c1: #56B4E9; --c2: #E69F00; --c3: #3fc49a; --c4: #e59ac6; --c5: #f07a3a; --vrai: #f0efea;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fond: #141413; --carte: #1f1f1d; --encre: #f0efea; --encre-2: #bcbbb2; --encre-3: #8d8c84;
+    --trait: #34342f; --accent: #6aa9f0; --accent-fond: #1a2a3d;
+    --ok: #5cc592; --ok-fond: #17301f; --ko: #f08b84; --ko-fond: #3a1d1b;
+    --panne: rgba(230, 120, 40, 0.10); --grille: #2c2c28;
+    --c1: #56B4E9; --c2: #E69F00; --c3: #3fc49a; --c4: #e59ac6; --c5: #f07a3a; --vrai: #f0efea;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fond); color: var(--encre);
+         font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.2rem; margin: 44px 0 6px; }
+  h3 { font-size: 1rem; margin: 0 0 6px; }
+  p { margin: 0 0 10px; }
+  a { color: var(--accent); }
+  .chapeau { color: var(--encre-2); max-width: 820px; margin-bottom: 18px; }
+  .intro { color: var(--encre-2); margin: 0 0 14px; max-width: 860px; }
+  .carte { background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; padding: 16px 18px; }
+  .discret { color: var(--encre-3); font-size: 0.86rem; }
+
+  .chiffres { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .chiffre { background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; padding: 14px 16px; }
+  .chiffre b { display: block; font-size: 1.75rem; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .chiffre span { color: var(--encre-2); font-size: 0.88rem; }
+
+  .boucle { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: stretch; }
+  .bloc { background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; padding: 12px;
+          cursor: pointer; text-align: left; font: inherit; color: inherit; position: relative; }
+  .bloc:hover { border-color: var(--accent); }
+  .bloc[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-fond); }
+  .bloc small { display: block; color: var(--encre-2); font-size: 0.8rem; margin-top: 2px; }
+  .bloc .num { font-size: 0.75rem; font-weight: 700; color: var(--accent); }
+  #detail-bloc { margin-top: 12px; }
+  #detail-bloc ul { margin: 6px 0 0; padding-left: 20px; }
+
+  .filtres { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 10px; align-items: end; }
+  .filtres label { display: flex; flex-direction: column; font-size: 0.8rem; color: var(--encre-2); gap: 3px; }
+  select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--trait);
+           background: var(--carte); color: var(--encre); min-width: 160px; }
+  .tableau { overflow-x: auto; max-height: 420px; overflow-y: auto; border: 1px solid var(--trait); border-radius: 10px; background: var(--carte); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--trait); vertical-align: top; white-space: nowrap; }
+  td.texte { white-space: normal; min-width: 240px; }
+  th { position: sticky; top: 0; background: var(--carte); color: var(--encre-2); font-weight: 600; z-index: 1; }
+  td.n { font-variant-numeric: tabular-nums; text-align: right; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--accent-fond); }
+  tbody tr.choisi { background: var(--accent-fond); box-shadow: inset 3px 0 0 var(--accent); }
+  .pastille { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.78rem; font-weight: 600; }
+  .pastille.ok { background: var(--ok-fond); color: var(--ok); }
+  .pastille.ko { background: var(--ko-fond); color: var(--ko); }
+  .pastille.boucle { background: var(--accent-fond); color: var(--accent); }
+  .pastille.main { background: var(--trait); color: var(--encre-2); }
+
+  #vol { margin-top: 14px; }
+  .entete-vol { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; margin-bottom: 8px; }
+  .entete-vol h3 { font-size: 1.1rem; margin: 0; }
+  .resume-vol { color: var(--encre-2); margin: 0 0 8px; }
+  .graphes { display: grid; grid-template-columns: 2.1fr 1fr; gap: 12px; }
+  .graphe { background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; padding: 6px; min-width: 0; }
+  #chrono { height: 640px; }
+  #dessus { height: 640px; }
+  #comparaison { height: 420px; }
+
+  .etapes { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+  .etape { background: var(--carte); border: 1px solid var(--trait); border-radius: 10px; padding: 12px 14px; }
+  .etape .num { color: var(--accent); font-weight: 700; font-size: 0.8rem; }
+  .etape p { font-size: 0.88rem; color: var(--encre-2); margin: 4px 0 0; }
+  .bloque { counter-reset: b; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .bloque li { background: var(--carte); border: 1px solid var(--trait); border-left: 3px solid var(--c5); border-radius: 8px; padding: 10px 14px; }
+  footer { margin-top: 48px; color: var(--encre-3); font-size: 0.85rem; }
+  .theme { float: right; font: inherit; font-size: 0.82rem; background: var(--carte); color: var(--encre-2);
+           border: 1px solid var(--trait); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+
+  @media (max-width: 900px) {
+    .boucle { grid-template-columns: 1fr 1fr; }
+    .graphes { grid-template-columns: 1fr; }
+    #dessus { height: 420px; }
+  }
+  @media (max-width: 520px) {
+    .boucle { grid-template-columns: 1fr; }
+    #chrono { height: 720px; }
+  }
+</style>
+</head>
+<body>
+<main>
+<button class="theme" id="theme" type="button">Thème</button>
+<h1>Détection de pannes capteurs et récupération sur drone</h1>
+<p class="chapeau">Un drone simulé (ArduPilot SITL) qui <strong>détecte seul la panne d'un capteur, reconnaît lequel et réagit sans abandonner sa mission</strong>. Cette page présente le test final : 48 vols neufs, sous vibration des moteurs, joués une seule fois avec des réglages figés. <a href="https://github.com/AntCro29/uav-imu-fault-detection">Code et documentation sur GitHub</a>.</p>
+
+<section class="chiffres" id="chiffres" aria-label="Chiffres clés"></section>
+
+<h2>La boucle</h2>
+<p class="intro">Elle tourne en vol, 10 fois par seconde, sans savoir quelle panne a été injectée. Cliquez sur un bloc.</p>
+<div class="boucle" id="boucle"></div>
+<div class="carte" id="detail-bloc"></div>
+
+<h2>Les 48 vols de test</h2>
+<p class="intro">Chaque panne a été volée deux fois : avec la boucle, puis avec la réaction que j'aurais choisie à la main en connaissant la panne. Trois vents de 6 m/s jamais vus à l'apprentissage. Cliquez sur un vol pour voir son déroulé.</p>
+<div class="filtres">
+  <label>Panne <select id="f-panne"></select></label>
+  <label>Réaction <select id="f-reaction"></select></label>
+  <label>Vent venant de <select id="f-vent"></select></label>
+  <span class="discret" id="f-compte"></span>
+</div>
+<div class="tableau"><table>
+  <thead><tr><th>Vol</th><th>Panne</th><th>Vent</th><th>Réaction</th><th>Ce qui s'est passé</th><th>Erreur position</th><th>Erreur attitude</th><th>Attendu</th></tr></thead>
+  <tbody id="lignes"></tbody>
+</table></div>
+
+<section id="vol" aria-live="polite">
+  <div class="entete-vol"><h3 id="vol-titre"></h3><span id="vol-pastilles"></span></div>
+  <p class="resume-vol" id="vol-resume"></p>
+  <div class="graphes">
+    <div class="graphe"><div id="chrono"></div></div>
+    <div class="graphe"><div id="dessus"></div></div>
+  </div>
+  <p class="discret" id="vol-source"></p>
+</section>
+
+<h2>Boucle ou réaction choisie à la main ?</h2>
+<p class="intro">Erreur de position maximale pendant la panne et les 90 s qui suivent, un point par vol. La boucle, qui doit d'abord reconnaître la panne, obtient des erreurs du même ordre que la réaction choisie en connaissant la panne ; sur les leurres, elle écarte le GPS environ 3 s plus tard (le temps du classifieur).</p>
+<div class="graphe"><div id="comparaison"></div></div>
+
+<h2>Les étapes du projet</h2>
+<div class="etapes" id="etapes"></div>
+
+<h2>Ce qui bloque encore</h2>
+<ol class="bloque" id="bloque"></ol>
+
+<footer>
+  <p>Méthode : réglages figés sur des vols d'apprentissage, test exécuté une seule fois ; erreurs mesurées contre la position et l'attitude vraies du simulateur, sur le cœur de l'EKF qui pilote ; innovations et score de l'autoencodeur tels que la boucle les a vus en vol. Simulation seulement, un vol par configuration : des ordres de grandeur, pas des statistiques.</p>
+  <p id="genere"></p>
+</footer>
+</main>
+
+<script src="plotly-basic.min.js"></script>
+<script src="donnees.js"></script>
+<script>
+"use strict";
+const D = window.DONNEES;
+const R = D.resume;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fr = (x, d = 1) => x == null ? "—" : x.toFixed(d).replace(".", ",");
+
+const PANNES = {
+  biais: "Biais d'accéléromètre (IMU 1)", gyro: "Biais de gyroscope (IMU 2)",
+  derive: "Dérive lente, trois IMU", leurre: "Leurre GPS 100 m", leurre_rampe: "Leurre GPS en rampe",
+  jam: "Brouillage GPS", magneto: "Magnétomètre décalé", nominal: "Aucune panne"
+};
+const ORDRE = Object.keys(PANNES);
+const REACTIONS = { boucle: "Boucle complète", r3: "Exclusion du GPS (à la main)", rimu: "Vote entre IMU (à la main)" };
+const CAPTEUR = { acc: "accéléromètre", gyr: "gyroscope" };
+
+// ---- chiffres clés ----
+const chiffres = [
+  [`${R.conformes_boucle} / ${R.vols_boucle}`, "bonnes réactions de la boucle"],
+  [`${R.fausses_alarmes}`, `fausse alarme sur ${R.duree_normale_s.toLocaleString("fr-FR")} s de vol normal`],
+  [`${R.zone_100} / ${R.vols_boucle}`, `vols restés 100 % du temps dans la zone de ${R.zone_m} m`],
+  [`${R.recours}`, "dernier recours déclenché"],
+  ["531", "vols simulés pour tout le projet"],
+];
+document.getElementById("chiffres").innerHTML = chiffres.map(([v, t]) => `<div class="chiffre"><b>${v}</b><span>${t}</span></div>`).join("");
+
+// ---- la boucle ----
+const BLOCS = [
+  { titre: "Innovations de l'EKF", sous: "le signal d'entrée", texte: `<p>À chaque mesure, l'EKF (le filtre qui estime position, vitesse et orientation) compare ce que mesure le capteur à ce qu'il avait prédit. Cet écart, rapporté à l'écart attendu, est une <strong>innovation</strong> : SV (vitesse GPS), SP (position GPS), SH (hauteur), SM (magnétomètre). À 1, l'EKF rejette la mesure.</p><p>Elles sont déjà calculées par ArduPilot et normalisées par son incertitude : un auto-diagnostic gratuit.</p>` },
+  { titre: "Détecteur", sous: "autoencodeur", texte: `<p>Un réseau de neurones entraîné <strong>uniquement sur des vols sans panne</strong> à recopier les innovations des 3 dernières secondes. S'il n'y arrive plus, le vol ne ressemble plus à un vol normal : alarme (seuil ${fr(R.seuil_ae, 2)}, fixé sur des vols de validation). La perte du fix GPS et un Isolation Forest peuvent aussi la donner.</p><ul><li>Test : 0 fausse alarme ; alarme 0,5 à 0,7 s après le début des leurres et des pannes de magnétomètre.</li><li>Ne voit pas les petites pannes d'IMU communes aux trois IMU sous vibration.</li></ul>` },
+  { titre: "Classifieur", sous: "quel capteur ?", texte: `<p>Une forêt aléatoire (200 arbres de décision) reçoit les innovations des 3 s qui suivent l'alarme et donne la famille de la panne : GPS, accéléromètre, gyroscope ou magnétomètre.</p><ul><li>Test : bonne famille sur les 9 vols qu'elle a classés (leurres, rampes, magnétomètre).</li><li>Le prix : 3 s d'attente avant d'agir sur un leurre.</li></ul>` },
+  { titre: "Exclusion du GPS", sous: "panne GPS", texte: `<p>Au lieu d'atterrir (réaction d'ArduPilot), le drone <strong>écarte le GPS</strong> et continue son cercle avec la centrale inertielle et le flux optique (caméra vers le sol qui mesure la vitesse). Il reprend le GPS quand sa position reste cohérente avec l'estimée pendant 30 s.</p><p><strong>Dernier recours</strong> : GPS toujours pas fiable 2 min après, retour au départ (ou atterrissage si ArduPilot le refuse). Jamais déclenché au test.</p>` },
+  { titre: "Vote entre IMU", sous: "panne d'une IMU", texte: `<p>Le drone porte trois IMU (accéléromètres et gyroscopes). Le vote les compare en continu, désigne celle qui s'écarte des deux autres et force l'EKF à utiliser celui de ses deux cœurs qui ne dépend pas d'elle. ArduPilot ne le fait pas toujours de lui-même.</p><ul><li>Test : bonne IMU désignée en 1,1 à 1,6 s ; erreur d'attitude ≤ 1,3° (accéléromètre) et ≤ 4,1° (gyroscope).</li></ul>` },
+];
+const boucle = document.getElementById("boucle");
+boucle.innerHTML = BLOCS.map((b, i) => `<button class="bloc" type="button" data-i="${i}" aria-pressed="false"><span class="num">${i + 1}</span><strong> ${b.titre}</strong><small>${b.sous}</small></button>`).join("");
+function choisirBloc(i) {
+  boucle.querySelectorAll(".bloc").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.i === i)));
+  document.getElementById("detail-bloc").innerHTML = `<h3>${BLOCS[i].titre}</h3>${BLOCS[i].texte}`;
+}
+boucle.addEventListener("click", e => { const b = e.target.closest(".bloc"); if (b) choisirBloc(+b.dataset.i); });
+choisirBloc(1);
+
+// ---- table des vols ----
+function imuTexte(v) {
+  const m = /IMU (\d) (\w+) \+([\d.]+)/.exec(v.imu || "");
+  return m ? `IMU ${+m[1] + 1} (${CAPTEUR[m[2]] || m[2]}) désignée à +${fr(+m[3])} s` : null;
+}
+function cause(v) {
+  if (/fix/.test(v.gps_ecarte)) return "perte du fix";
+  if (/classifieur/.test(v.gps_ecarte)) return "classifieur : GPS";
+  if (/SP/.test(v.gps_ecarte)) return "innovation de position";
+  return "";
+}
+function deroule(v) {
+  const t0 = v.injection, i = v.instants;
+  if (i.exclusions.length) {
+    let s = `GPS écarté à +${fr(i.exclusions[0] - t0)} s (${cause(v)})`;
+    if (i.retours.length) s += `, repris à +${fr(i.retours[0] - t0)} s`;
+    return s;
+  }
+  const imu = imuTexte(v);
+  if (imu) return imu;
+  if (v.scenario === "nominal") return v.reponse === "boucle" ? "aucune alarme, aucune action" : "aucune action";
+  if (v.scenario === "magneto") return v.famille === "magnéto" ? `alarme à +${fr(i.alarme - t0)} s, famille magnétomètre : signalée, aucune action` : "aucune action";
+  if (v.scenario === "derive") return "panne non détectée, aucune action";
+  return "—";
+}
+const errPos = v => v.scenario === "nominal" ? v.pos_cercle : Math.max(v.pos_pendant, v.pos_apres);
+const errAtt = v => v.scenario === "nominal" ? v.att_cercle : Math.max(v.att_pendant, v.att_apres);
+
+const vols = D.vols.slice().sort((a, b) => ORDRE.indexOf(a.scenario) - ORDRE.indexOf(b.scenario) || a.vent - b.vent || (a.reponse === "boucle" ? -1 : 1));
+const fPanne = document.getElementById("f-panne"), fReac = document.getElementById("f-reaction"), fVent = document.getElementById("f-vent");
+fPanne.innerHTML = `<option value="">Toutes</option>` + ORDRE.map(k => `<option value="${k}">${PANNES[k]}</option>`).join("");
+fReac.innerHTML = `<option value="">Toutes</option><option value="boucle">Boucle complète</option><option value="main">Choisie à la main</option>`;
+fVent.innerHTML = `<option value="">Tous</option>` + [...new Set(vols.map(v => v.vent))].sort((a, b) => a - b).map(v => `<option value="${v}">${v}°</option>`).join("");
+const ancre = /^#vol-(\d+)$/.exec(location.hash);
+let volChoisi = ancre && D.vols.some(v => v.vol === +ancre[1]) ? +ancre[1] : 502;
+
+function afficherTable() {
+  const p = fPanne.value, r = fReac.value, w = fVent.value;
+  const l = vols.filter(v => (!p || v.scenario === p) && (!r || (r === "boucle") === (v.reponse === "boucle")) && (!w || v.vent === +w));
+  document.getElementById("f-compte").textContent = `${l.length} vol${l.length > 1 ? "s" : ""}`;
+  document.getElementById("lignes").innerHTML = l.map(v => `<tr data-vol="${v.vol}" class="${v.vol === volChoisi ? "choisi" : ""}" tabindex="0">
+    <td class="n">${v.vol}</td><td>${PANNES[v.scenario]}</td><td class="n">${v.vent}°</td>
+    <td><span class="pastille ${v.reponse === "boucle" ? "boucle" : "main"}">${REACTIONS[v.reponse]}</span></td>
+    <td class="texte">${deroule(v)}</td><td class="n">${fr(errPos(v))} m</td><td class="n">${fr(errAtt(v))}°</td>
+    <td><span class="pastille ${v.conforme === "oui" ? "ok" : "ko"}">${v.conforme === "oui" ? "✓ oui" : "✗ " + v.conforme}</span></td></tr>`).join("");
+}
+[fPanne, fReac, fVent].forEach(s => s.addEventListener("change", afficherTable));
+const corps = document.getElementById("lignes");
+corps.addEventListener("click", e => { const tr = e.target.closest("tr"); if (tr) choisirVol(+tr.dataset.vol); });
+corps.addEventListener("keydown", e => { if (e.key === "Enter") { const tr = e.target.closest("tr"); if (tr) choisirVol(+tr.dataset.vol); } });
+
+// ---- un vol ----
+function axeCommun() {
+  return { gridcolor: css("--grille"), zerolinecolor: css("--grille"), color: css("--encre-2"), linecolor: css("--trait") };
+}
+function baseLayout() {
+  return { paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: { color: css("--encre"), size: 12, family: "-apple-system, Segoe UI, sans-serif" },
+           margin: { l: 58, r: 12, t: 30, b: 42 }, hovermode: "x unified", hoverlabel: { bgcolor: css("--carte"), bordercolor: css("--trait"), font: { color: css("--encre") } } };
+}
+const plancher = a => a.map(x => x == null ? null : Math.max(x, 0.01));
+
+function choisirVol(n) {
+  volChoisi = n;
+  try { history.replaceState(null, "", `#vol-${n}`); } catch (e) {}
+  const v = D.vols.find(x => x.vol === n);
+  document.querySelectorAll("#lignes tr").forEach(tr => tr.classList.toggle("choisi", +tr.dataset.vol === n));
+  const t0 = v.injection, t1 = v.fin_panne, i = v.instants;
+  document.getElementById("vol-titre").textContent = `Vol ${v.vol} — ${PANNES[v.scenario]}, vent de 6 m/s venant de ${v.vent}°`;
+  document.getElementById("vol-pastilles").innerHTML = `<span class="pastille ${v.reponse === "boucle" ? "boucle" : "main"}">${REACTIONS[v.reponse]}</span> <span class="pastille ${v.conforme === "oui" ? "ok" : "ko"}">${v.conforme === "oui" ? "✓ réaction attendue" : "✗ " + v.conforme}</span>`;
+  const morceaux = [deroule(v)];
+  if (i.alarme != null && t0 != null && i.exclusions.length) morceaux.unshift(`alarme à +${fr(i.alarme - t0)} s`);
+  morceaux.push(`erreur de position ≤ ${fr(errPos(v))} m, d'attitude ≤ ${fr(errAtt(v))}°`, `${v["zone_%"]} % du temps dans la zone`);
+  document.getElementById("vol-resume").textContent = morceaux.join(" · ") + ".";
+  document.getElementById("vol-source").textContent = v.source === "trace"
+    ? "Innovations et score de l'autoencodeur : valeurs reçues par la boucle pendant le vol (cœur principal de l'EKF). Pendant l'exclusion du GPS, les innovations GPS ne sont plus calculées."
+    : "Vol de la réaction « vote entre IMU » seule : le détecteur ne tournait pas. Innovations lues dans le log (cœur 0), pas de score d'autoencodeur.";
+
+  const T = v.trace, N = v.nav;
+  const enc = css("--encre-2");
+  const traces = [
+    { x: T.tc, y: plancher(T.SV), name: "SV vitesse", line: { color: css("--c1"), width: 1.4 }, xaxis: "x", yaxis: "y" },
+    { x: T.tc, y: plancher(T.SP), name: "SP position", line: { color: css("--c2"), width: 1.4 }, xaxis: "x", yaxis: "y" },
+    { x: T.tc, y: plancher(T.SM), name: "SM magnétomètre", line: { color: css("--c3"), width: 1.4 }, xaxis: "x", yaxis: "y" },
+    { x: T.tc, y: plancher(T.SH), name: "SH hauteur", line: { color: css("--c4"), width: 1.4 }, xaxis: "x", yaxis: "y" },
+  ];
+  if (T.score_ae) {
+    traces.push({ x: T.tc, y: T.score_ae, name: "score autoencodeur", line: { color: css("--c5"), width: 1.6 }, xaxis: "x", yaxis: "y2", showlegend: false },
+                { x: [T.tc[0], T.tc[T.tc.length - 1]], y: [R.seuil_ae, R.seuil_ae], name: "seuil d'alarme", mode: "lines", line: { color: enc, width: 1.2, dash: "dash" }, xaxis: "x", yaxis: "y2", showlegend: false, hoverinfo: "skip" });
+  }
+  // bandes de décision
+  const bande = (a, b, y, couleur, nom) => ({ x: [a, b], y: [y, y], mode: "lines", line: { color: couleur, width: 14 }, xaxis: "x", yaxis: "y3", name: nom, showlegend: false, hovertemplate: `${nom} : %{x:.1f} s<extra></extra>` });
+  const fin = T.tc[T.tc.length - 1];
+  const dec = [];
+  if (i.alarme != null) dec.push(bande(i.alarme, i.exclusions.length ? i.exclusions[0] : (i.decision ?? i.alarme + 3), 2, css("--c5"), "alarme"));
+  i.exclusions.forEach((a, k) => dec.push(bande(a, i.retours[k] ?? fin, 1, css("--c3"), "GPS écarté")));
+  if (i.imu != null) dec.push(bande(i.imu, fin, 0, css("--c1"), "IMU fautive écartée"));
+  if (i.decision != null) dec.push({ x: [i.decision], y: [2], mode: "markers", marker: { symbol: "diamond", size: 12, color: css("--encre"), line: { color: css("--carte"), width: 2 } }, xaxis: "x", yaxis: "y3", showlegend: false, name: "classifieur",
+                                     hovertemplate: `classifieur : famille ${v.famille} à %{x:.1f} s<extra></extra>` });
+  traces.push(...dec);
+  traces.push({ x: N.tc, y: N.err_pos, name: "erreur de position (m)", line: { color: css("--c1"), width: 1.6 }, xaxis: "x", yaxis: "y4", showlegend: false },
+              { x: N.tc, y: N.err_att, name: "erreur d'attitude (°)", line: { color: css("--c4"), width: 1.6 }, xaxis: "x", yaxis: "y5", showlegend: false });
+
+  const ax = axeCommun();
+  const L = Object.assign(baseLayout(), {
+    showlegend: true, legend: { orientation: "h", x: 0, y: 1.01, yanchor: "bottom", font: { size: 11 } },
+    margin: { l: 92, r: 12, t: 34, b: 42 },
+    grid: { rows: 5, columns: 1, pattern: "independent" },
+    xaxis: Object.assign({}, ax, { anchor: "y5", title: { text: t0 != null ? "temps de cercle (s) — zone colorée : panne" : "temps de cercle (s)" } }),
+    yaxis: Object.assign({}, ax, { domain: [0.79, 1], type: "log", title: { text: "innovations" }, dtick: 1, exponentformat: "power" }),
+    yaxis2: Object.assign({}, ax, { domain: [0.58, 0.75], type: "log", title: { text: "score AE" }, dtick: 2, exponentformat: "power" }),
+    yaxis3: Object.assign({}, ax, { domain: [0.43, 0.54], range: [-0.6, 2.6], tickvals: [0, 1, 2], ticktext: ["IMU écartée", "GPS écarté", "alarme"], showgrid: false, zeroline: false }),
+    yaxis4: Object.assign({}, ax, { domain: [0.22, 0.39], title: { text: "position (m)" }, rangemode: "tozero" }),
+    yaxis5: Object.assign({}, ax, { domain: [0, 0.18], title: { text: "attitude (°)" }, rangemode: "tozero" }),
+    shapes: t0 == null ? [] : [{ type: "rect", xref: "x", yref: "paper", x0: t0, x1: t1, y0: 0, y1: 1, fillcolor: css("--panne"), line: { width: 0 }, layer: "below" }],
+    annotations: T.score_ae ? [] : [{ xref: "paper", yref: "paper", x: 0.5, y: 0.665, text: "pas de détecteur dans ce vol", showarrow: false, font: { color: css("--encre-3") } }],
+  });
+  if (!T.score_ae) Object.assign(L.yaxis2, { type: "linear", showticklabels: false });
+  Plotly.react("chrono", traces, L, { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d"] });
+
+  // vue de dessus
+  const G = v.gps, enPanne = G.tc.map(t => t0 != null && t >= t0 && t <= t1);
+  const cercle = Array.from({ length: 121 }, (_, k) => 2 * Math.PI * k / 120);
+  const dessus = [
+    { x: cercle.map(a => v.centre[1] + R.zone_m * Math.sin(a)), y: cercle.map(a => v.centre[0] + R.zone_m * Math.cos(a)), mode: "lines", name: `zone de ${R.zone_m} m`, line: { color: css("--encre-3"), dash: "dot", width: 1 }, hoverinfo: "skip" },
+    { x: G.e.filter((_, k) => enPanne[k]), y: G.n.filter((_, k) => enPanne[k]), mode: "markers", name: "GPS pendant la panne", marker: { color: css("--c2"), size: 3 } },
+    { x: N.e, y: N.n, mode: "lines", name: "position vraie", line: { color: css("--vrai"), width: 1.6 } },
+    { x: N.pe, y: N.pn, mode: "lines", name: "position estimée", line: { color: css("--c1"), width: 1.4, dash: "dash" } },
+  ];
+  const Ld = Object.assign(baseLayout(), {
+    title: { text: "Vue de dessus", font: { size: 13 } }, hovermode: "closest", margin: { l: 50, r: 10, t: 36, b: 40 },
+    xaxis: Object.assign({}, ax, { title: { text: "est (m)" }, scaleanchor: "y" }),
+    yaxis: Object.assign({}, ax, { title: { text: "nord (m)" } }),
+    legend: { orientation: "h", x: 0, y: -0.12, font: { size: 11 } },
+  });
+  Plotly.react("dessus", dessus, Ld, { displaylogo: false, responsive: true });
+}
+
+// ---- comparaison ----
+function comparer() {
+  const cats = ORDRE.filter(k => k !== "nominal");
+  const nuage = (filtre, nom, couleur, decal, symbole) => {
+    const l = D.vols.filter(v => v.scenario !== "nominal" && filtre(v));
+    return { x: l.map(v => cats.indexOf(v.scenario) + decal), y: l.map(errPos), mode: "markers", name: nom,
+             marker: { color: couleur, size: 11, symbol: symbole, line: { color: css("--carte"), width: 2 } },
+             text: l.map(v => `vol ${v.vol}, vent ${v.vent}° : ${fr(errPos(v))} m`), hovertemplate: "%{text}<extra>" + nom + "</extra>" };
+  };
+  const ax = axeCommun();
+  Plotly.react("comparaison", [
+    nuage(v => v.reponse === "boucle", "boucle complète", css("--c1"), -0.12, "circle"),
+    nuage(v => v.reponse !== "boucle", "réaction choisie à la main", css("--c2"), 0.12, "diamond"),
+  ], Object.assign(baseLayout(), {
+    hovermode: "closest", margin: { l: 60, r: 12, t: 20, b: 70 },
+    xaxis: Object.assign({}, ax, { tickvals: cats.map((_, k) => k), ticktext: cats.map(k => PANNES[k].replace(" (", "<br>(").replace(", trois", "<br>trois")), range: [-0.6, cats.length - 0.4] }),
+    yaxis: Object.assign({}, ax, { title: { text: "erreur de position max (m)" }, rangemode: "tozero" }),
+    legend: { orientation: "h", x: 0, y: 1.1 },
+  }), { displaylogo: false, responsive: true });
+}
+
+// ---- parcours et points bloquants ----
+const ETAPES = [
+  ["Banc de vols", "Vols automatiques en Python, pannes injectées par le simulateur, données étiquetées à 10 Hz."],
+  ["Détection, IMU idéale", "Seuils, seuil adaptatif, Isolation Forest : 41 pannes sur 42 sans fausse alarme. Trop facile : IMU sans bruit."],
+  ["Réaction aux pannes GPS", "Écarter le GPS plutôt qu'atterrir : la mission continue. Le point dur : reprendre le GPS au bon moment."],
+  ["Réalisme", "Vibration des moteurs au niveau des tests d'ArduPilot : innovations ×4 à 10 en vol normal, tout est à refaire."],
+  ["Flux optique, autoencodeur", "Navigation sans GPS tenue au flux optique ; autoencodeur : 21 pannes sur 32, 0 fausse alarme."],
+  ["Classifieur et vote", "Bonne famille 14 fois sur 16 sous vibration ; bonne IMU désignée 12 fois sur 12."],
+  ["Boucle complète", "Tout enchaîné en vol : bonne réaction 24 fois sur 24, sans puis avec vibration."],
+];
+document.getElementById("etapes").innerHTML = ETAPES.map(([t, p], k) => `<div class="etape"><span class="num">ÉTAPE ${k + 1}</span><h3>${t}</h3><p>${p}</p></div>`).join("");
+const BLOQUE = [
+  "<strong>Petites pannes d'IMU invisibles sous vibration</strong> : biais d'accéléromètre de 0,3 à 0,5 m/s², dérives lentes, biais de gyroscope de 0,01 rad/s. Sur une seule IMU, le vote les rattrape ; sur les trois, rien ne les détecte. La vibration ajoute aux innovations plus de bruit que la panne, et l'EKF ne voit pas sa propre erreur d'orientation.",
+  "<strong>Sans GPS, la navigation dépend du flux optique</strong> : sans lui, 107 à 186 m d'erreur en 60 s sous vibration. Le flux simulé voit un sol plat et texturé partout.",
+  "<strong>Le critère de reprise du GPS est fragile</strong> : le GPS est jugé contre une estimée qui dérive ; sans flux optique, un leurre lent a été repris trop tôt (99 m).",
+  "<strong>Une seule décision par vol</strong> : une fausse alarme consommerait la décision.",
+  "<strong>Validation limitée</strong> : simulation, un vol par configuration, un seul niveau de vent pour la boucle, une seule mission ; leurres simplifiés (position décalée, pas la vitesse).",
+];
+document.getElementById("bloque").innerHTML = BLOQUE.map(t => `<li>${t}</li>`).join("");
+document.getElementById("genere").textContent = `Données générées le ${R.genere} par scripts/exporter_dashboard.py à partir des logs archivés et des traces de vol.`;
+
+// ---- thème ----
+const racine = document.documentElement;
+try { const t = localStorage.getItem("theme"); if (t) racine.dataset.theme = t; } catch (e) {}
+document.getElementById("theme").addEventListener("click", () => {
+  const sombre = racine.dataset.theme ? racine.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  racine.dataset.theme = sombre ? "light" : "dark";
+  try { localStorage.setItem("theme", racine.dataset.theme); } catch (e) {}
+  toutDessiner();
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", toutDessiner);
+
+function toutDessiner() { afficherTable(); choisirVol(volChoisi); comparer(); }
+toutDessiner();
+</script>
+</body>
+</html>

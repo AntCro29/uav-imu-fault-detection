@@ -253,7 +253,7 @@ une seule IMU.
 | **Pannes détectées** | **32 / 42** | **31 / 42** | **41 / 42** | **41 / 42** |
 | **Fausses alarmes (8 217 s de nominal)** | **0** | **0** | **0** | **0** |
 
-**La dérive lente piège le seuil adaptatif**, comme on pouvait le craindre : sa fenêtre de 30 s
+**La dérive lente piège le seuil adaptatif**, comme c'était à craindre : sa fenêtre de 30 s
 suit la montée de la panne et le seuil reste toujours au-dessus de l'innovation (8 dérives
 manquées sur 9). L'Isolation Forest, dont la référence est le nominal d'entraînement, fixe, les
 détecte toutes. Les délais sur les dérives sont longs par nature : au moment de la détection, le
@@ -357,7 +357,7 @@ principal, `scripts/erreur_navigation.py`), sous un vent de 6 m/s venant du nord
 
 Avec la traînée, le drone reste sur son cercle pendant toute la coupure. Ce résultat est à lire
 avec prudence : la traînée évite le passage en « stopped aiding », mais la précision pendant la
-coupure vient de l'IMU simulée, sans bruit ni vibration dans nos vols. Sur un vrai drone,
+coupure vient de l'IMU simulée, sans bruit ni vibration dans ces vols. Sur un vrai drone,
 l'intégration inertielle pure dériverait beaucoup plus vite (non mesuré ici). Elle varie aussi
 d'un vol à l'autre : sur la campagne suivante (R3 v2, pas encore décrite ici), sous un vent venant
 de l'est, l'erreur a atteint 34 m après 60 s sans GPS. Le détecteur ne fait
@@ -553,7 +553,7 @@ Jusqu'ici, l'IMU simulée n'avait aucun bruit. Ces vols ajoutent un bruit de gyr
 le vol (`vol_auto.py --bruit R` : `SIM_GYR1/2/3_RND = R`, réglé avant le décollage ; amplitude
 radians(R) × gaz, sur les trois axes). Niveaux 30 et 60 : choisis d'après un commentaire du
 simulateur (`AP_InertialSensor_SITL.cpp:235`) qui annonce 0,2 à 0,4 rad/s pour un vrai
-multirotor, soit R ≈ 30 à 60 avec les gaz de nos vols (≈ 0,38). **Ce choix était trop pessimiste**
+multirotor, soit R ≈ 30 à 60 avec les gaz de ces vols (≈ 0,38). **Ce choix était trop pessimiste**
 (voir « Ce que représente ce niveau de bruit » plus bas) : ces vols sont un cas extrême, pas un
 drone réaliste. Plan : vent 6 m/s
 venant de 20°, 140° ou 260° (turbulence 2), injection à 128, 135 ou 143 s ; pour chaque niveau,
@@ -615,7 +615,7 @@ l'exclusion : R3 v3 ne tiendrait pas avec un bruit de ce niveau.
   0,08 / 0,27 au bruit 30 et 0,16 / 0,53 au bruit 60. L'EKF suppose 0,094 (`EK3_GYRO_P_NSE` = 0,015
   rad/s, `AP_NavEKF3_core.cpp:1174`). Un gyroscope MEMS courant sur les drones, l'ICM-42688-P, est
   donné à 2,8 mdps/√Hz, soit environ 0,003 °/√s (valeur relevée sur une source secondaire, non
-  vérifiée sur la fiche du constructeur) : 30 à 180 fois moins que nos vols.
+  vérifiée sur la fiche du constructeur) : 30 à 180 fois moins que dans ces vols.
 - Les 0,2 à 0,4 rad/s du commentaire correspondent en fait à la **vibration des moteurs**. Le test
   `MotorVibration` d'ArduPilot (`Tools/autotest/arducopter.py:5644-5658`, « real values taken from
   a 180mm Quad ») règle `SIM_VIB_MOT_MAX` 350, `SIM_GYR1_RND` 20 et `SIM_ACC1_RND` 5. Avec une
@@ -1369,7 +1369,7 @@ ne déclenche), brouillage (la perte du fix écarte le GPS dès l'alarme), nomin
 
 **Attribution des alarmes** (débuts et fins d'alarme de chaque détecteur, lignes « DÉTECTEUR »
 des 24 journaux de la boucle ; fausse alarme = alarme commencée après 10 s de cercle et avant
-l'injection, ou avant le RTL pour un nominal, soit 3 276 s de vol normal) :
+l'injection, ou avant le RTL pour un nominal, soit 3 142 s de vol normal) :
 
 - **aucune fausse alarme**, ni de l'autoencodeur, ni de l'Isolation Forest (la préparation en
   laissait attendre environ une sur 2 300 s) ;
