@@ -6,6 +6,12 @@ simulateur officiel d'ArduPilot (SITL, ArduCopter), sur 531 vols automatisés.
 
 Titre visé : *Machine Learning Based IMU Fault Detection and Recovery for Autonomous UAVs*.
 
+**Démonstration (1 min 40)** : un leurre GPS de 100 m sous vibration des moteurs, détecté, classé
+et écarté en vol, puis le [tableau de bord](https://antcro29.github.io/uav-imu-fault-detection/dashboard/)
+des 48 vols de test. Le vol montré est un vol de démonstration, hors campagne de test.
+
+https://github.com/user-attachments/assets/8f6523cb-7493-45d3-8cec-c01272f9aafb
+
 **En bref**
 
 - **Ce qui marche :** sous vibration des moteurs, la chaîne complète (détection, puis

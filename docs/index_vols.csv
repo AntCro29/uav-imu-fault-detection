@@ -536,3 +536,4 @@ vol,log_ardupilot,fin_ecriture,taille_octets,fichier_archive,journal,remarque
 541,55,2026-11-05 00:42:29,28725248,vols/vol_0541.BIN,journal_magneto_6_310_2_imus_3_injection_143_vibration_flux_optique_flux_permanent_reponse_r3_20261105-003513.txt,
 542,56,2026-11-05 00:47:43,19644416,vols/vol_0542.BIN,journal_nominal_6_310_2_imus_3_vibration_flux_optique_flux_permanent_reponse_boucle_20261105-004229.txt,
 543,57,2026-11-05 00:53:15,21049344,vols/vol_0543.BIN,journal_nominal_6_310_2_imus_3_vibration_flux_optique_flux_permanent_reponse_r3_20261105-004743.txt,
+544,59,2026-11-08 18:25:00,29282304,vols/vol_0544.BIN,journal_leurre_6_35_2_imus_3_injection_128_amplitude_100_vibration_flux_optique_flux_permanent_reponse_boucle_20261108-181737.txt,vol de démonstration de la vidéo (README), hors campagne de test
