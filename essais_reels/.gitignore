@@ -1,0 +1,9 @@
+# Journaux de vol bruts et décodés : positions GPS et numéros de série, jamais publiés
+data/
+
+# Python
+__pycache__/
+.venv/
+
+# macOS
+.DS_Store
