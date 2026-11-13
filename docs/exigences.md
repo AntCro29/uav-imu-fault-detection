@@ -61,7 +61,16 @@ les essais ; aucune valeur n'est retenue à ce stade.
 | EX-U02 | En cas de perte de liaison avec la radiocommande, le drone applique l'action prévue par son réglage (retour au départ par défaut, à confirmer dans S2) | action déclenchée et délai : **à fixer** | Essai, à basse hauteur en terrain dégagé, après les autres essais |
 | EX-U03 | Un même trajet, répété, donne des trajectoires proches | dispersion entre passages : **à fixer** ; mode de vol permettant un trajet reproductible : à identifier dans S2 | Essai |
 | EX-U04 | Autonomie en stationnaire, batterie standard, de 100 % au seuil d'alerte de batterie faible | durée : **à mesurer**, comparée à l'autonomie annoncée à titre indicatif | Essai |
-| EX-U05 | Chaque vol produit un journal complet et décodable : 10 Hz sans trou, attitude, vitesses, position et batterie présentes du décollage à l'arrêt des moteurs | 100 % des vols | Analyse (vérifiable dès maintenant sur les 18 vols existants) |
+| EX-U05 | Chaque vol produit un journal complet et décodable : 10 Hz sans trou, attitude, vitesses, position et batterie présentes du décollage à la confirmation d'atterrissage | 100 % des vols ; « sans trou » : aucun pas de `OSD.flyTime` supérieur à 0,2 s (un échantillon isolé manquant est toléré) | Analyse (vérifiable dès maintenant sur les 18 vols existants) |
+
+**Révision d'EX-U05 (2026-11-12, validée par Antoine, avant les vols de la campagne 1).**
+Rédaction d'origine : « du décollage à l'arrêt des moteurs », sans seuil pour « sans trou ».
+L'analyse des 18 vols antérieurs a montré que l'exigence était invérifiable telle quelle :
+aucun journal ne contient l'arrêt des moteurs, l'enregistrement s'arrête à l'atterrissage
+(`ConfirmLanding` dans 17 cas sur 18). L'horodatage `CUSTOM.dateTime` est irrégulier (0,1 à
+0,4 s) sans dériver ; les trous se comptent donc sur `OSD.flyTime`, horloge du drone au pas de
+0,1 s. Le critère a été fixé **après** avoir vu ces 18 vols : leur verdict sera rapporté avec
+cette réserve ; les vols de la campagne 1 sont jugés sur un critère figé avant eux.
 
 ## Traçabilité
 
