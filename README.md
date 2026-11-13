@@ -20,6 +20,10 @@ https://github.com/user-attachments/assets/8f6523cb-7493-45d3-8cec-c01272f9aafb
 - **Ce qui bloque :** sous vibration, les petites pannes d'accéléromètre ou de gyroscope qui
   touchent toutes les IMU à la fois ne sont vues par aucun détecteur ; et la navigation sans GPS
   ne tient que grâce à un capteur de flux optique simulé dans des conditions idéales.
+- **Confrontation au réel :** des essais en vol sur un vrai drone (DJI Lito X1) ont mesuré la
+  précision du stationnaire avec une vérité externe (vidéo). Le drone réel se situe entre le banc
+  sans vibration, trop idéal, et le banc avec vibration, environ 5 fois plus sévère : les résultats
+  « sous vibration » de ce projet sont un cas dur.
 - **Périmètre :** simulation seulement, une mission (un cercle de surveillance), un à trois vols
   par configuration : les chiffres sont des ordres de grandeur, pas des statistiques.
 
@@ -151,6 +155,52 @@ son cercle.*
    seul niveau de vent pour la boucle, une seule mission, un seul type de drone. Les leurres sont
    simplifiés (la position est décalée, pas la vitesse).
 
+## Confrontation au réel
+
+Le banc SITL repose sur des hypothèses : niveau de vibration, bruit des capteurs, comportement
+en stationnaire. Pour les vérifier, j'ai mené une campagne d'essais en vol sur un drone réel, un
+DJI Lito X1 de 249 g, conduite comme un dossier de validation : exigences, plan d'essai avec
+critères figés avant les vols, fiches d'essai, rapport. Le dossier complet est dans
+[`essais_reels/`](essais_reels/README.md), le rapport dans
+[`essais_reels/docs/rapport_campagne1.md`](essais_reels/docs/rapport_campagne1.md).
+
+Le journal d'un DJI ne contient ni les mesures brutes des IMU ni l'état interne du filtre de
+navigation. Les exigences liées à la détection de pannes ne peuvent donc pas être vérifiées sur
+ce drone. Ce qui se compare au banc, c'est la tenue de position.
+
+**Méthode.** En stationnaire, la caméra filme vers le bas deux cibles posées au sol, à une distance
+mesurée. Le déplacement des cibles dans l'image donne la position **réelle** du drone, que je
+compare à la position **estimée** de son journal. C'est le même principe que dans le SITL, où la
+vérité du simulateur est comparée à l'estimation de l'EKF. Quatre vols SITL de stationnaire ont été
+faits dans les mêmes conditions (vent de 5 m/s du nord, 3 paliers de 60 s), avec les mêmes
+statistiques.
+
+| Centile 95 de l'écart à la position moyenne du palier | DJI réel | SITL sans vibration | SITL avec vibration |
+|---|---|---|---|
+| 20 m, horizontal vrai | 0,10-0,20 m | 0,03 m | 0,90-1,01 m |
+| 20 m, horizontal estimé | 0,23-0,30 m | 0,02-0,03 m | 0,60-0,63 m |
+| 20 m, vertical vrai | 0,05-0,09 m | 0,02 m | 1,00-1,60 m |
+
+**Ce que les essais ont montré :**
+
+- **Le banc avec vibration est un cas sévère.** Le drone réel bouge environ 5 fois moins en
+  horizontal et 10 à 20 fois moins en vertical que le SITL avec la vibration de mes campagnes. Ce
+  niveau vient du test ArduPilot d'un quadricoptère de 180 mm. Les limites décrites plus haut
+  (petites pannes d'IMU invisibles, navigation sans GPS) ont donc été mesurées dans des conditions
+  plus dures que celles de ce drone.
+- **Une estimation ne se valide pas par elle-même.** Sur le drone réel, à l'échelle de 20 à
+  30 cm, position estimée et position réelle divergent : l'estimée bouge plus que le drone à 20 m,
+  et à 2 m le drone dérive deux fois plus que ce qu'indique son journal. Le banc reproduit ce
+  second cas sous vibration. Dans les deux cas, seule une vérité externe permet de juger.
+- **Le vent se lit dans l'attitude.** En stationnaire, le drone penche face au vent. L'inclinaison
+  du DJI donne un vent du nord de 4,5 à 7,7 m/s, cohérent avec la mesure au sol (4 à 5 m/s), et
+  le SITL, soumis à un vent du nord, penche bien vers le nord.
+
+Limites : un vol par configuration ; deux appareils et deux estimateurs différents, donc une
+comparaison en ordre de grandeur. Verdicts de la campagne : 6 exigences conformes, 2 non
+vérifiables (stationnaire par vision, jamais activé avec un bon GPS), 1 non conclue (vitesse
+maximale), 1 relevée (inclinaison maximale).
+
 ## Les étapes du projet
 
 | Étape | Ce qui a été fait | Ce que l'étape a montré |
@@ -188,11 +238,10 @@ Le détail de chaque étape, avec ses tableaux et ses figures, est dans
 
 ## Prochaines étapes
 
-1. Une vidéo de démonstration de la boucle complète.
-2. Détecter les petites pannes d'IMU sous vibration, en accumulant leur effet dans le temps
+1. Détecter les petites pannes d'IMU sous vibration, en accumulant leur effet dans le temps
    plutôt qu'en regardant 3 s.
-3. Juger le GPS pendant son exclusion autrement qu'en le comparant à une estimation qui dérive.
-4. Plus de vols par configuration, et plusieurs décisions par vol.
+2. Juger le GPS pendant son exclusion autrement qu'en le comparant à une estimation qui dérive.
+3. Plus de vols par configuration, et plusieurs décisions par vol.
 
 ## Pour aller plus loin
 
@@ -214,9 +263,11 @@ Le détail de chaque étape, avec ses tableaux et ses figures, est dans
   `detecteur_ml.py`, `detecteur_ae.py`, `detecteur_en_ligne.py`), classifieur (`classifieur.py`,
   `classifieur_en_ligne.py`), réaction aux pannes GPS (`recuperation.py`), vote entre IMU
   (`vote_imu.py`, `trois_imu.parm`), évaluation (`comparer_detecteurs.py`,
-  `erreur_navigation.py`, `evaluer_rimu.py`, `evaluer_boucle.py`), figures
+  `erreur_navigation.py`, `evaluer_rimu.py`, `evaluer_boucle.py`, `comparer_stationnaire.py`), figures
   (`figures_readme.py` pour celles de cette page, `exporter_dashboard.py` pour le tableau de bord).
 - `docs/` : documentation détaillée et figures.
+- `essais_reels/` : dossier de validation en vol du DJI Lito X1 (exigences, plan d'essai, fiches,
+  rapport, scripts d'analyse des journaux et de la vidéo), avec son propre historique Git.
 - `data/` (non versionné) : jeux de données régénérables et journaux de vol. Les logs `.BIN` sont
   archivés hors du dépôt sous leur numéro de vol, car ArduPilot réutilise ses numéros après 500.
 
