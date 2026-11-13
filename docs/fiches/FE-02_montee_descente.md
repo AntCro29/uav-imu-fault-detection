@@ -26,7 +26,8 @@ Journal de vol (`OSD.zSpeed`, `OSD.height`, `RC.throttle`) ; heures des répéti
 Vitesse verticale maximale mesurée entre 4,5 et 5,5 m/s, en montée et en descente, sur chacune
 des 3 répétitions.
 
-**Validité :** mode Normal, manche des gaz en butée pendant la phase mesurée.
+**Validité :** mode Normal, manche des gaz en butée (`RC.throttle` exactement 364 ou 1684) ; la
+phase mesurée est l'ensemble des échantillons consécutifs en butée.
 
 ## Résultat
 

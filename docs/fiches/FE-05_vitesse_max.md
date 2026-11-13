@@ -27,7 +27,8 @@ Journal de vol (`OSD.xSpeed`, `OSD.ySpeed`, `OSD.pitch`, `OSD.roll`) ; heures ; 
 Vitesse horizontale maximale, moyenne de l'aller et du retour, entre 10,8 et 13,2 m/s
 (±10 % de 12 m/s). Inclinaison maximale relevée et comparée à 35°.
 
-**Validité :** mode Normal, manche en butée pendant la phase mesurée.
+**Validité :** mode Normal, manche de tangage en butée (`RC.elevator` exactement 364 ou 1684) ;
+la phase mesurée est l'ensemble des échantillons consécutifs en butée.
 
 ## Résultat
 

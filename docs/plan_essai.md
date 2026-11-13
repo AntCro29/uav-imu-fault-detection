@@ -3,6 +3,17 @@
 Version du 2026-11-09, critères validés par Antoine avant les vols. Aucun critère ne sera modifié
 après les vols ; un écart ou un imprévu est consigné dans le rapport, pas corrigé dans ce plan.
 
+**Révision du 2026-11-12, avant tout vol de la campagne** (validée par Antoine) :
+
+- « manches au neutre » et « manche en butée » définis par des valeurs du journal (mesurées sur
+  les 18 vols antérieurs : une manche relâchée revient exactement à 1024, une butée vaut
+  exactement 364 ou 1684) ;
+- début d'un palier de stationnaire : 3 s après que le drone est immobile, pour que le freinage
+  ne compte pas dans le palier ;
+- FE-03 : `OSD.isVisionUsed` relevé et non plus exigé. Sur les 18 vols antérieurs, il n'est vrai
+  que lorsque le GPS n'est pas utilisé (7 épisodes, 85 s au total) : avec un bon GPS, le
+  positionnement par vision seul ne peut sans doute pas être isolé.
+
 ## Périmètre
 
 Première campagne réduite : une séance de 30 à 60 min sur une grande pelouse, 3 batteries,
@@ -37,9 +48,18 @@ réussi ni échoué) et rapporté comme tel.
 |---|---|
 | Satellites ≥ 10 pendant tout le palier | tous |
 | `OSD.isVisionUsed` faux pendant tout le palier | FE-01 |
-| `OSD.isVisionUsed` vrai pendant tout le palier | FE-03 |
-| Aucune action sur les manches pendant le palier (`RC.*` au neutre) | FE-01, FE-03 |
+| Aucune action sur les manches pendant le palier : `RC.aileron`, `RC.elevator`, `RC.throttle` et `RC.rudder` valent **exactement 1024** sur tous les échantillons du palier | FE-01, FE-03 |
+| Manche concernée en butée : valeur **exactement 364 ou 1684** ; la phase mesurée est l'ensemble des échantillons consécutifs en butée | FE-02 (`RC.throttle`), FE-05 (`RC.elevator`) |
 | Mode de vol Normal (`GPSAtti` dans le journal) | tous |
+
+**Début d'un palier de stationnaire (FE-01, FE-03)** : après avoir relâché les manches, attendre
+3 s que le drone soit immobile, puis lancer le chrono. Le palier est la fenêtre de 60 s qui
+commence à l'heure notée dans le carnet.
+
+**FE-03 et le positionnement par vision** : `OSD.isVisionUsed` est relevé sur chaque palier.
+S'il est vrai pendant tout le palier, le palier compte pour EX-C03 et EX-C04. Sinon, le palier
+est rapporté comme stationnaire à 2 m sans positionnement par vision déclaré, et EX-C03 et
+EX-C04 sont déclarées **non vérifiables dans ces conditions** (ni conformes ni non conformes).
 
 ## Critères d'arrêt
 

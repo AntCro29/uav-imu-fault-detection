@@ -12,8 +12,8 @@
 
 1. Décoller, se placer à 2 m à la verticale de la cible.
 2. Caméra vers le bas, **lancer l'enregistrement vidéo**.
-3. Palier 1 : relâcher les manches, **ne plus toucher la radiocommande pendant 60 s**. Noter
-   l'heure de début.
+3. Palier 1 : relâcher les manches, attendre **3 s** que le drone soit immobile, puis lancer le
+   chrono : **ne plus toucher la radiocommande pendant 60 s**. Noter l'heure de début.
 4. Déplacer le drone de 1 m puis le ramener au-dessus de la cible.
 5. Paliers 2 et 3 : refaire les étapes 3 et 4.
 6. Arrêter la vidéo. Enchaîner sur FE-04 (premier retour au départ).
@@ -27,8 +27,13 @@ Journal de vol ; vidéo ; heures de début des paliers ; vent.
 Pour chaque palier : 95 % des échantillons à moins de 0,3 m (horizontal) et 0,1 m (vertical) de
 la position moyenne du palier. Exigence satisfaite si les 3 paliers le sont.
 
-**Validité :** satellites ≥ 10, `OSD.isVisionUsed` vrai, manches au neutre, mode Normal, pendant
-tout le palier.
+**Validité :** satellites ≥ 10, manches au neutre (les 4 voies `RC.*` exactement à 1024), mode
+Normal, pendant tout le palier.
+
+**Positionnement par vision (révision du 2026-11-12, avant les vols) :** `OSD.isVisionUsed` est
+relevé, non exigé. Vrai pendant tout le palier : le palier compte pour EX-C03 et EX-C04. Sinon :
+palier rapporté comme stationnaire à 2 m sans vision déclarée, EX-C03 et EX-C04 non vérifiables
+dans ces conditions. Sur les 18 vols antérieurs, `isVisionUsed` n'est vrai que sans GPS.
 
 **Limite (vérifiée sur le vol du 2026-11-06) :** la latitude et la longitude du journal ont une
 résolution très fine, suffisante pour 0,3 m. En revanche, la hauteur `OSD.height` n'est
@@ -38,8 +43,8 @@ rapporté avec cette limite.
 
 ## Résultat
 
-| Palier | Valide | Horizontal (95 %) | Vertical (95 %) | Verdict |
+| Palier | Valide | Vision utilisée | Horizontal (95 %) | Vertical (95 %) | Verdict |
 |---|---|---|---|---|
-| 1 | | | | |
-| 2 | | | | |
-| 3 | | | | |
+| 1 | | | | | |
+| 2 | | | | | |
+| 3 | | | | | |

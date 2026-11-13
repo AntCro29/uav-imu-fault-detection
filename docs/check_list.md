@@ -30,7 +30,8 @@
 | 2 | B2 | FE-03 stationnaire 2 m (3 × 60 s, vidéo) → FE-04 retour au départ n° 1 |
 | 3 | B3 | FE-04 retours n° 2 et 3 → FE-05 vitesse (si 200 m dégagés) |
 
-Pendant les paliers de stationnaire : **ne pas toucher la radiocommande pendant 60 s.**
+Pendant les paliers de stationnaire : relâcher les manches, **attendre 3 s** que le drone soit
+immobile, lancer le chrono, puis **ne pas toucher la radiocommande pendant 60 s.**
 
 ## Arrêt immédiat (atterrir)
 
