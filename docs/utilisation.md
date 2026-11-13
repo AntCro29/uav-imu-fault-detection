@@ -66,6 +66,11 @@ ce dépôt, dans `~/drone/ardupilot`.
   passé dans la zone surveillée et vent estimé, avant, pendant et après une perturbation GPS ;
   figure de la trajectoire vue de dessus et des erreurs. Résultats :
   `docs/figures/coupure_gps_sans_trainee_vol23.png` et `coupure_gps_avec_trainee_vol130.png`.
+- `scripts/comparer_stationnaire.py <log.BIN> [...]` : précision d'un stationnaire fait avec
+  `vol_auto.py --stationnaire H` ; pour 3 paliers de 60 s (10, 75 et 140 s après l'entrée en
+  LOITER), centile 95 de l'écart à la position moyenne du palier, position vraie (`SIM`) et
+  estimée (`XKF1`, cœur principal), en horizontal et en vertical, et inclinaison moyenne. Mêmes
+  statistiques que l'analyse des essais réels (`essais_reels/`).
 - `scripts/recuperation.py` : la réponse R3 aux pannes GPS (automate : écarter le GPS, revenir
   au GPS, dernier recours), utilisée par `vol_auto.py --reponse r3`.
 - `scripts/trois_imu.parm` : troisième IMU simulée et sa calibration factice (sans elle,
@@ -227,6 +232,15 @@ classification.
 
 ```bash
 scripts/lancer_vol.sh leurre 6 20 2 --imus 3 --injection 128 --amplitude 100 --vibration --flux_optique --flux_permanent --reponse boucle
+```
+
+Stationnaire, pour la comparaison avec les essais réels : `--stationnaire H` (scénario `nominal`
+seulement) fait décoller à H m, passer en LOITER manches au neutre et y rester 200 s, sans
+cercle.
+
+```bash
+# stationnaire à 2 m, flux optique permanent, vent de 5 m/s venant du nord, turbulence 1
+scripts/lancer_vol.sh nominal 5 0 1 --stationnaire 2 --flux_optique --flux_permanent
 ```
 
 ### Archive des logs

@@ -3,7 +3,7 @@
 Usage : python vol_auto.py <scenario> [vent_vitesse vent_direction vent_turbulence]
                            [--injection T] [--amplitude A] [--detecteur] [--trainee] [--bascule T]
                            [--reponse rien|natif|natif_trainee|r3|rimu|boucle] [--bruit R] [--vibration [gyro|acc]]
-                           [--flux_optique] [--flux_permanent] [--imus 3] [--imu N]
+                           [--flux_optique] [--flux_permanent] [--imus 3] [--imu N] [--stationnaire H]
         (le SITL doit écouter sur tcp:127.0.0.1:5760)
 Scénarios : nominal, gps60, gps30, biais10, biais05, biais, magneto, jam, et (amplitude obligatoire)
 derive, gyro, bruit_gyro, bloque, leurre, leurre_rampe.
@@ -98,6 +98,8 @@ troisième est un témoin.
 --imu N : panne d'IMU (biais, derive, gyro, bruit_gyro, bloque) sur la seule IMU N (1 à 3,
 numérotation des paramètres SIM_ACCn_*, SIM_GYRn_*, SIM_ACCELn_FAIL) au lieu de toutes. L'IMU 1
 est celle du cœur EKF 0, principal par défaut.
+--stationnaire H : scénario nominal sans cercle : décollage à H m, puis LOITER manches au neutre
+pendant STATIONNAIRE_S (200 s), pour comparer la tenue de position aux essais réels.
 Le plus simple est de passer par scripts/lancer_vol.sh, qui démarre et arrête le SITL.
 
 Déroulé : attente que les deux cœurs EKF utilisent le GPS, FS_EKF_ACTION 0,
@@ -160,6 +162,9 @@ DUREE_BASCULE = 60
 CERCLE_NOMINAL = 180
 CERCLE_APRES = 90
 ALT_DECOLLAGE = 15.0
+# Stationnaire (comparaison avec les essais réels du DJI Lito X1) : LOITER manches au neutre,
+# 3 paliers de 60 s découpés après coup dans les 200 s
+STATIONNAIRE_S = 200
 ALT_SECURITE = 8.0
 # Désarmement forcé seulement si le drone est vraiment posé (état vrai du simulateur, SIM_STATE) :
 # l'altitude estimée seule ne suffit pas, elle peut dériver au sol sous vibration et le drone
@@ -175,7 +180,7 @@ POSE_ATTENTE_MAX_S = 120
 # refusait le RTL (vols 151, 155, 157, 159, 167, 169, 171). La navigation à l'estime commence
 # environ 10 s après l'exclusion du GPS : le délai tombe donc après le recours (120 s).
 DUREE_ESTIME_S = 120
-GUIDED, RTL, CIRCLE, LAND = 4, 6, 7, 9
+GUIDED, LOITER, RTL, CIRCLE, LAND = 4, 5, 6, 7, 9
 
 arguments = argparse.ArgumentParser(description="Vol SITL automatique")
 arguments.add_argument("scenario", choices=list(SCENARIOS))
@@ -196,6 +201,8 @@ arguments.add_argument("--flux_permanent", action="store_true",
                        help="fusionne en permanence la vitesse du flux optique avec le GPS")
 arguments.add_argument("--imus", type=int, choices=[2, 3], default=2,
                        help="nombre d'IMU simulées (3 : chargé par lancer_vol.sh --imus 3)")
+arguments.add_argument("--stationnaire", type=float, metavar="H",
+                       help="décollage à H m puis stationnaire en LOITER pendant STATIONNAIRE_S, sans cercle (scénario nominal)")
 arguments.add_argument("--imu", type=int, choices=[1, 2, 3], help="panne d'IMU sur cette seule IMU")
 args = arguments.parse_args()
 if args.flux_permanent and not args.flux_optique:
@@ -210,6 +217,10 @@ vent = args.vent or None
 CERCLE_AVANT = args.injection
 
 panne = SCENARIOS[args.scenario]
+if args.stationnaire is not None:
+    if panne is not None:
+        sys.exit("--stationnaire : seulement avec le scénario nominal")
+    ALT_DECOLLAGE = args.stationnaire
 if panne is not None:
     panne = dict(panne)
     if args.amplitude is not None:
@@ -646,41 +657,46 @@ pomper(10)
 override = True
 pomper(1)
 journal("rc 3 1500 (renvoyé toutes les 0,5 s)")
-changer_mode(CIRCLE, "circle")
-t_cercle = time.monotonic()
-en_cercle = True
-journal("t = 0 du cercle")
-
-# Cercle nominal, ou cercle avec panne
-if panne is None and args.bascule is not None:
-    pomper(args.bascule)
-    basculer(2)
-    pomper(DUREE_BASCULE)
-    basculer(1)
-    pomper(CERCLE_NOMINAL - args.bascule - DUREE_BASCULE)
-elif panne is None:
-    pomper(CERCLE_NOMINAL)
+if args.stationnaire is not None:
+    changer_mode(LOITER, "loiter")
+    journal(f"t = 0 du stationnaire à {ALT_DECOLLAGE:g} m")
+    pomper(STATIONNAIRE_S)
 else:
-    pomper(CERCLE_AVANT)
-    if panne.get("rampe"):
-        # Dérive : la valeur monte d'un pas par seconde jusqu'à l'amplitude, atteinte à la fin
-        journal(f"Injection en rampe : {panne['params']} de 0 à {panne['injection']} en {panne['duree']} s")
-        debut = time.monotonic()
-        panne_active = True
-        for pas in range(1, panne["duree"] + 1):
-            if not panne_active:      # garde-fou d'altitude déclenché : ne pas réinjecter
-                break
-            regler({nom: panne["injection"] * pas / panne["duree"] for nom in panne["params"]})
-            if pomper(debut + pas - time.monotonic(), lambda: not panne_active):
-                break
+    changer_mode(CIRCLE, "circle")
+    t_cercle = time.monotonic()
+    en_cercle = True
+    journal("t = 0 du cercle")
+
+    # Cercle nominal, ou cercle avec panne
+    if panne is None and args.bascule is not None:
+        pomper(args.bascule)
+        basculer(2)
+        pomper(DUREE_BASCULE)
+        basculer(1)
+        pomper(CERCLE_NOMINAL - args.bascule - DUREE_BASCULE)
+    elif panne is None:
+        pomper(CERCLE_NOMINAL)
     else:
-        journal(f"Injection : {panne['params']} = {panne['injection']}")
-        regler({nom: panne["injection"] for nom in panne["params"]})
-        panne_active = True
-        pomper(panne["duree"], lambda: not panne_active)
-    if panne_active:
-        retirer()
-    pomper(CERCLE_APRES)
+        pomper(CERCLE_AVANT)
+        if panne.get("rampe"):
+            # Dérive : la valeur monte d'un pas par seconde jusqu'à l'amplitude, atteinte à la fin
+            journal(f"Injection en rampe : {panne['params']} de 0 à {panne['injection']} en {panne['duree']} s")
+            debut = time.monotonic()
+            panne_active = True
+            for pas in range(1, panne["duree"] + 1):
+                if not panne_active:      # garde-fou d'altitude déclenché : ne pas réinjecter
+                    break
+                regler({nom: panne["injection"] * pas / panne["duree"] for nom in panne["params"]})
+                if pomper(debut + pas - time.monotonic(), lambda: not panne_active):
+                    break
+        else:
+            journal(f"Injection : {panne['params']} = {panne['injection']}")
+            regler({nom: panne["injection"] for nom in panne["params"]})
+            panne_active = True
+            pomper(panne["duree"], lambda: not panne_active)
+        if panne_active:
+            retirer()
+        pomper(CERCLE_APRES)
 
 # Atterrissage
 en_cercle = False
