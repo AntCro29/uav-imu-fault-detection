@@ -94,12 +94,12 @@ atterrissage de précision activé ou non, mode débutant **désactivé**.
 
 | Exigence | Essai | Résultat |
 |---|---|---|
-| EX-C01 | FE-01 | à venir |
-| EX-C02 | FE-01 | à venir |
-| EX-C03 | FE-03 | à venir |
-| EX-C04 | FE-03 | à venir |
-| EX-C05 | FE-05 | à venir |
-| EX-C07 (Normal) | FE-02 | à venir |
-| EX-C08 (Normal) | FE-02 | à venir |
-| EX-C09 | FE-05 | à venir |
-| EX-U01 | FE-04 | à venir |
+| EX-C01 | FE-01 | conforme (campagne 1, `rapport_campagne1.md`) |
+| EX-C02 | FE-01 | conforme (campagne 1, `rapport_campagne1.md`) |
+| EX-C03 | FE-03 | non vérifiable (campagne 1, `rapport_campagne1.md`) |
+| EX-C04 | FE-03 | non vérifiable (campagne 1, `rapport_campagne1.md`) |
+| EX-C05 | FE-05 | non conclue (campagne 1, `rapport_campagne1.md`) |
+| EX-C07 (Normal) | FE-02 | conforme (campagne 1, `rapport_campagne1.md`) |
+| EX-C08 (Normal) | FE-02 | conforme (campagne 1, `rapport_campagne1.md`) |
+| EX-C09 | FE-05 | relevée : 34,3° (campagne 1, `rapport_campagne1.md`) |
+| EX-U01 | FE-04 | conforme (campagne 1, `rapport_campagne1.md`) |

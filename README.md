@@ -18,11 +18,26 @@ confronte les mesures aux critères.
 
 ## État actuel
 
-- Aucun essai réalisé pour l'instant.
-- 18 vols antérieurs, faits sans protocole, servent à découvrir le contenu des journaux et à
-  mettre au point les scripts d'analyse. Ils ne valident aucune exigence.
-- Les performances annoncées viennent pour l'instant d'une source secondaire (revendeur
-  reprenant la fiche DJI) : à confirmer sur la documentation officielle.
+**Campagne 1 faite le 2026-11-13** (rapport : `docs/rapport_campagne1.md`) : 2 vols, 7 journaux,
+critères figés avant les vols.
+
+| Exigence | Verdict |
+|---|---|
+| EX-C01 / EX-C02 stationnaire satellite (±1,5 m / ±0,5 m) | conformes : dérive **réelle** mesurée sur la vidéo 0,10 à 0,20 m et 0,05 à 0,09 m |
+| EX-C07 / EX-C08 montée et descente, mode Normal (5 m/s) | conformes : 5,0 à 5,1 m/s |
+| EX-U01 retour au départ ≤ 1,5 m | conforme : 0,17 / 0,60 / 0,58 m au ruban |
+| EX-U05 journal complet | conforme sur les 7 journaux de la campagne |
+| EX-C03 / EX-C04 stationnaire par vision | non vérifiables : la vision n'est jamais déclarée avec un bon GPS |
+| EX-C05 vitesse max (12 m/s) | non conclue : retour non valide ; aller à 11,9 m/s |
+| EX-C09 inclinaison max (35°) | relevée : 34,3° |
+
+Résultat principal : à l'échelle de 20 à 30 cm, la position estimée par le drone et sa position
+réelle (vidéo) divergent, dans un sens ou dans l'autre selon les paliers. Un journal seul ne
+suffit pas à valider la précision de positionnement.
+
+Les 18 vols antérieurs, faits sans protocole, ont servi à mettre au point l'analyse. Ils ne
+valident aucune exigence de performance. Les performances annoncées viennent d'une source
+secondaire (revendeur reprenant la fiche DJI), encore à confirmer sur la documentation officielle.
 
 ## Contraintes
 
@@ -49,5 +64,14 @@ des IMU ni l'état interne du filtre de navigation.
 ```
 docs/      exigences, plan d'essai, fiches d'essai, rapport
 scripts/   analyse des journaux
-data/      journaux bruts et décodés (local uniquement)
+data/      journaux bruts et décodés, carnet de terrain, vidéos (local uniquement)
 ```
+
+Scripts (Python, `requirements.txt`) :
+
+- `charger_vol.py` : lecture d'un journal décodé, temps depuis le décollage, position en mètres ;
+  supprime les coordonnées absolues et les numéros de série ;
+- `analyser_essais.py` : rattache le carnet aux journaux et applique les critères de FE-01 à FE-05 ;
+- `analyser_video.py` : dérive réelle en stationnaire, mesurée sur la vidéo à partir de deux
+  cibles au sol, comparée au journal ;
+- `verifier_journal.py` : EX-U05.
